@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 from functools import partial
 
@@ -234,7 +235,7 @@ class Difftool(standard.Dialog):
             detect_renames=self.detect_renames,
         )
 
-    def _left_right_args(self):
+    def _left_right_args(self) -> tuple[str, str]:
         if self.diff_arg:
             left = self.diff_arg[0]
         else:
@@ -265,7 +266,7 @@ def diff_expression(
     create_widget: bool = False,
     hide_expr: bool = False,
     focus_tree: bool = False,
-):
+) -> bool:
     """Show a diff dialog for diff expressions"""
     dlg = Difftool(
         context, parent, expr=expr, hide_expr=hide_expr, focus_tree=focus_tree
@@ -301,7 +302,7 @@ def difftool_launch(
     context,
     left=None,
     right=None,
-    oid=None,
+    oid: str | None = None,
     paths=None,
     is_root_commit: bool = False,
     staged: bool = False,
@@ -356,10 +357,10 @@ def difftool_launch(
         context.git.difftool(*args, **kwargs)
 
 
-def _get_left_right_for_oid(context, oid, is_root_commit):
+def _get_left_right_for_oid(context, oid: str, is_root_commit: bool) -> tuple[str, str]:
     """Specify diff parameters for diffing a commit"""
     if is_root_commit:
-        left = context.model.empty_tree_oid
+        left: str = context.model.empty_tree_oid
         right = oid
     else:
         left = f'{oid}~'
@@ -367,7 +368,7 @@ def _get_left_right_for_oid(context, oid, is_root_commit):
     return left, right
 
 
-def _add_difftool_args(context, args, left, right, left_take_parent):
+def _add_difftool_args(context, args, left, right, left_take_parent) -> None:
     """Setup the first argument to difftool"""
     if left:
         original_left = left
@@ -402,7 +403,7 @@ def _add_difftool_args(context, args, left, right, left_take_parent):
         args.append(right)
 
 
-def _get_renamed_paths(context, left, right, path, detect_renames):
+def _get_renamed_paths(context, left, right, path, detect_renames) -> set[str]:
     """Get filenames as they existed beyond a rename
 
     Use ``git log --follow --format= --name-only -- <path>`` to discover the
