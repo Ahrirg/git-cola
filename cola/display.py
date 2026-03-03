@@ -1,6 +1,7 @@
 """Display models and utility functions"""
 import collections
 from datetime import datetime
+from typing import Any
 
 try:
     import notify2
@@ -18,7 +19,7 @@ from .models import prefs
 NOTIFICATIONS_AVAILABLE = bool(notify2 or notifypy)
 
 
-def shorten_paths(source_paths):
+def shorten_paths(source_paths) -> dict[Any, Any]:
     """Shorten a sequence of paths into unique strings for display"""
     result = {}
     # Start by assuming that all paths are in conflict.
