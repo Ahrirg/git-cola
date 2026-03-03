@@ -689,8 +689,8 @@ def autodetect_proxy_environ() -> dict[Any, Any]:
     if not xdg_current_desktop:
         return add_env
 
-    http_proxy = None
-    https_proxy = None
+    http_proxy: str | UStr | None = None
+    https_proxy: str | UStr | None = None
     if xdg_current_desktop == 'KDE' or xdg_current_desktop.endswith(':KDE'):
         kreadconfig = core.find_executable('kreadconfig5')
         if kreadconfig:
@@ -736,7 +736,9 @@ def autodetect_proxy_gnome_is_enabled(gsettings: UStr | str) -> bool:
     return status == 0 and out.strip().strip("'") == 'manual'
 
 
-def autodetect_proxy_gnome(gsettings: UStr | str, scheme: UStr | str) -> UStr | None:
+def autodetect_proxy_gnome(
+    gsettings: UStr | str, scheme: UStr | str
+) -> str | UStr | None:
     """Return the configured HTTP proxy for Gnome"""
     status, out, _ = core.run_command(
         [gsettings, 'get', f'org.gnome.system.proxy.{scheme}', 'host']
@@ -754,7 +756,9 @@ def autodetect_proxy_gnome(gsettings: UStr | str, scheme: UStr | str) -> UStr | 
     return proxy
 
 
-def autodetect_proxy_kde(kreadconfig: UStr | str, scheme: UStr | str) -> UStr | None:
+def autodetect_proxy_kde(
+    kreadconfig: UStr | str, scheme: UStr | str
+) -> str | UStr | None:
     """Return the configured HTTP proxy for KDE"""
     cmd = [
         kreadconfig,
