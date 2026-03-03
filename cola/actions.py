@@ -9,16 +9,13 @@ from . import qtutils
 from .i18n import N_
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QAction
-from cola.widgets.commitmsg import CommitMessageEditor
-from cola.widgets.diff import DiffEditor
 from cola.widgets.status import StatusTreeWidget
 from cola.cmds import LaunchEditor, StageOrUnstage, LaunchEditorAtLine
-from typing import Union
 
 
 def cmd_action(
-    widget: Union[DiffEditor, CommitMessageEditor, StatusTreeWidget],
-    cmd: Union[type[LaunchEditor], type[LaunchEditorAtLine], type[StageOrUnstage]],
+    widget: StatusTreeWidget,
+    cmd: type[LaunchEditor] | type[LaunchEditorAtLine] | type[StageOrUnstage],
     context,
     icon: QIcon,
     *shortcuts,
@@ -29,7 +26,7 @@ def cmd_action(
     return action
 
 
-def launch_editor(context, widget, *shortcuts):
+def launch_editor(context, widget, *shortcuts) -> QAction:
     """Create a QAction to launch an editor"""
     icon = icons.edit()
     return cmd_action(
@@ -39,7 +36,7 @@ def launch_editor(context, widget, *shortcuts):
 
 def launch_editor_at_line(
     context,
-    widget: Union[DiffEditor, CommitMessageEditor, StatusTreeWidget],
+    widget: StatusTreeWidget,
     *shortcuts,
 ) -> QAction:
     """Create a QAction to launch an editor at the current line"""
@@ -49,7 +46,7 @@ def launch_editor_at_line(
     )
 
 
-def launch_difftool(context, widget: Union[DiffEditor, CommitMessageEditor]) -> QAction:
+def launch_difftool(context, widget) -> QAction:
     """Create a QAction to launch git-difftool(1)"""
     icon = icons.diff()
     cmd = difftool.LaunchDifftool
@@ -60,7 +57,7 @@ def launch_difftool(context, widget: Union[DiffEditor, CommitMessageEditor]) -> 
     return action
 
 
-def stage_or_unstage(context, widget: DiffEditor) -> QAction:
+def stage_or_unstage(context, widget) -> QAction:
     """Create a QAction to stage or unstage the selection"""
     icon = icons.add()
     return cmd_action(
@@ -68,7 +65,7 @@ def stage_or_unstage(context, widget: DiffEditor) -> QAction:
     )
 
 
-def move_down(widget: Union[DiffEditor, CommitMessageEditor]) -> QAction:
+def move_down(widget) -> QAction:
     """Create a QAction to select the next item"""
     action = qtutils.add_action(
         widget, N_('Next File'), widget.down.emit, hotkeys.MOVE_DOWN_SECONDARY
@@ -77,7 +74,7 @@ def move_down(widget: Union[DiffEditor, CommitMessageEditor]) -> QAction:
     return action
 
 
-def move_up(widget: Union[DiffEditor, CommitMessageEditor]) -> QAction:
+def move_up(widget) -> QAction:
     """Create a QAction to select the previous/above item"""
     action = qtutils.add_action(
         widget, N_('Previous File'), widget.up.emit, hotkeys.MOVE_UP_SECONDARY
