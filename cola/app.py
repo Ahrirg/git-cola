@@ -12,6 +12,7 @@ from .cmd import CommandBus
 from PyQt5.QtCore import QChildEvent, QEvent, QTimerEvent
 from cola.core import UStr
 from cola.widgets.main import MainView
+from cola.fsmonitor import _Monitor
 from typing import Any, Callable
 
 try:
@@ -746,7 +747,7 @@ class ApplicationContext:
         self.runtask: qtutils.RunTask | None = None  # qtutils.RunTask
         self.settings = None  # settings.Settings
         self.selection: selection.SelectionModel | None = None
-        self.fsmonitor = None  # fsmonitor
+        self.fsmonitor: _Monitor | None = None
         self.view: MainView | None = None  # QWidget
         self.browser_windows = []  # list of browse.Browser
 
