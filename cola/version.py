@@ -1,6 +1,5 @@
 """Provide git-cola's version number"""
 from __future__ import annotations
-from typing import List
 
 try:
     from importlib import metadata
@@ -81,7 +80,7 @@ def version() -> str:
     return pkg_version
 
 
-def builtin_version():
+def builtin_version() -> str:
     """Returns the version recorded in cola/_version.py"""
     return VERSION
 
@@ -105,7 +104,7 @@ def check_git(context, key: str) -> bool:
     return check(key, git_version(context))
 
 
-def version_to_list(value: str) -> List[int | str]:
+def version_to_list(value: str) -> list[int | str]:
     """Convert a version string to a list of numbers or strings"""
     ver_list = []
     for part in value.split('.'):
