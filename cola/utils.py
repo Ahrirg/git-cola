@@ -17,7 +17,7 @@ from . import compat
 from .core import UStr
 from PyQt5.QtWidgets import QAction
 from typing import Any, Callable
-
+from typing import TypeVar
 
 _SSH_REGEX = re.compile(r'^(?P<user>[^@]+)@(?P<hostname>[^:]+):(?P<path>.+)')
 
@@ -31,7 +31,10 @@ def asint(obj: int, default: int = 0) -> int:
     return value
 
 
-def clamp(value: int, low: int, high: int) -> int:
+T = TypeVar('T', int, float)
+
+
+def clamp(value: T, low: T, high: T) -> T:
     """Clamp a value to the specified range"""
     return min(high, max(low, value))
 
