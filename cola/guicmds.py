@@ -1,6 +1,8 @@
 from __future__ import annotations
 import os
 
+from qtpy.QtWidgets import QWidget
+
 from qtpy.QtGui import QIcon
 
 from qtpy import QtGui
@@ -22,7 +24,7 @@ from .widgets.browse import BrowseBranch
 from .widgets.selectcommits import select_commits
 from .widgets.selectcommits import select_commits_and_output
 from PyQt5.QtWidgets import QMenu
-from typing import Callable, Optional
+from typing import Any, Callable
 
 
 def copy_commit_id_to_clipboard(context) -> None:
@@ -68,7 +70,7 @@ def browse_other(context) -> None:
     BrowseBranch.browse(context, branch)
 
 
-def checkout_branch(context, default=None) -> None:
+def checkout_branch(context, default: Any | None = None) -> None:
     """Launch the 'Checkout Branch' dialog."""
     branch = choose_potential_branch(
         context, N_('Checkout Branch'), N_('Checkout'), default=default
@@ -89,7 +91,7 @@ def cherry_pick(context) -> None:
     cmds.do(cmds.CherryPick, context, commits)
 
 
-def new_repo(context):
+def new_repo(context) -> str | None:
     """Prompt for a new directory and create a new Git repository
 
     :returns str: repository path or None if no repository was created.
@@ -123,7 +125,7 @@ def open_new_repo(context) -> None:
     cmds.do(cmds.OpenRepo, context, dirname)
 
 
-def new_bare_repo(context):
+def new_bare_repo(context) -> str | None:
     """Create a bare repository and configure a remote pointing to it"""
     result = None
     repo = prompt_for_new_bare_repo()
@@ -144,7 +146,7 @@ def new_bare_repo(context):
     return result
 
 
-def prompt_for_new_bare_repo():
+def prompt_for_new_bare_repo() -> str | None:
     """Prompt for a directory and name for a new bare repository"""
     path = qtutils.opendir_dialog(N_('Select Directory...'), core.getcwd())
     if not path:
@@ -229,7 +231,9 @@ def open_repo_in_new_window(context) -> None:
     cmds.do(cmds.OpenNewRepo, context, dirname)
 
 
-def open_quick_repo_search(context, open_repo: bool = True, parent=None):
+def open_quick_repo_search(
+    context, open_repo: bool = True, parent=None
+) -> switcher.SwitcherInnerView | None:
     """Open a Quick Repository Search dialog"""
     if parent is None:
         parent = qtutils.active_window()
@@ -292,9 +296,9 @@ def choose_from_dialog(
     context,
     title: str,
     button_text: str,
-    default: Optional[str],
+    default: str | None,
     icon: None = None,
-) -> Optional[str]:
+) -> str | None:
     """Choose a value from a dialog using the `get` method"""
     parent = qtutils.active_window()
     return get(context, title, button_text, parent, default=default, icon=icon)
@@ -304,23 +308,25 @@ def choose_ref(
     context,
     title: str,
     button_text: str,
-    default: Optional[str] = None,
+    default: str | None = None,
     icon: QIcon | None = None,
-) -> Optional[str]:
+) -> str | None:
     """Choose a Git ref and return it"""
     return choose_from_dialog(
         completion.GitRefDialog.get, context, title, button_text, default, icon=icon
     )
 
 
-def choose_branch(context, title, button_text, default=None, icon=None):
+def choose_branch(context, title, button_text, default=None, icon=None) -> str | None:
     """Choose a branch and return either the chosen branch or an empty value"""
     return choose_from_dialog(
         completion.GitBranchDialog.get, context, title, button_text, default, icon=icon
     )
 
 
-def choose_potential_branch(context, title, button_text, default=None, icon=None):
+def choose_potential_branch(
+    context, title, button_text, default=None, icon=None
+) -> str | None:
     """Choose a "potential" branch for checking out.
 
     This dialog includes remote branches from which new local branches can be created.
@@ -335,7 +341,9 @@ def choose_potential_branch(context, title, button_text, default=None, icon=None
     )
 
 
-def choose_remote_branch(context, title, button_text, default=None, icon=None):
+def choose_remote_branch(
+    context, title, button_text, default=None, icon=None
+) -> str | None:
     """Choose a remote branch"""
     return choose_from_dialog(
         completion.GitRemoteBranchDialog.get,
@@ -437,7 +445,7 @@ def restore_worktree(context) -> None:
         context.settings.set_value('restore::worktree', 'ref', ref)
 
 
-def build_layout_menu(widget, menu: QMenu) -> None:
+def build_layout_menu(widget: QWidget, menu: QMenu) -> None:
     """Add layouts from ~/.config/git-cola/layouts to the specified menu"""
     directory = resources.xdg_config_home('git-cola', 'layouts')
     if os.path.isdir(directory):
@@ -461,7 +469,7 @@ def build_layout_menu(widget, menu: QMenu) -> None:
         menu.addAction(load_layout_action)
 
 
-def save_layout(widget) -> None:
+def save_layout(widget: QWidget) -> None:
     """Save the current widget layout to a file"""
     default_filename = resources.xdg_config_home(
         'git-cola', 'layouts', 'default.layout'
@@ -477,7 +485,7 @@ def save_layout(widget) -> None:
         output.write(state)
 
 
-def load_layout(widget) -> None:
+def load_layout(widget: QWidget) -> None:
     """Choose a Qt layout file and apply it to the current widget"""
     directory = resources.xdg_config_home('git-cola', 'layouts')
     if not os.path.isdir(directory):
@@ -486,7 +494,7 @@ def load_layout(widget) -> None:
     load_layout_file(widget, filename)
 
 
-def load_layout_file(widget, filename) -> None:
+def load_layout_file(widget: QWidget, filename: Any) -> None:
     """Load a Qt layout file into the specified widget"""
     if not filename or not os.path.isfile(filename):
         return
