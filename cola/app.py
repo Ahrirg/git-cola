@@ -213,7 +213,7 @@ class ColaApplication:
         icons.install(icon_themes or get_icon_themes(context))
 
         self.context = context
-        self.theme = None
+        self.theme: themes.Theme | None = None
         self._install_hidpi_config()
         self._app = ColaQApplication(context, list(argv))
         self._app.setWindowIcon(icons.cola())
