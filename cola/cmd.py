@@ -1,8 +1,9 @@
 """Base Command class"""
+from __future__ import annotations
 import time
 
 from qtpy import QtCore
-from qtpy.QtCore import Qt, Signal
+from qtpy.QtCore import QObject, Qt, Signal
 from typing import Any
 
 
@@ -21,7 +22,7 @@ class Command:
         return '(undefined)'
 
     @classmethod
-    def is_undoable(cls):
+    def is_undoable(cls) -> bool:
         """Can this be undone?"""
         return cls.UNDOABLE
 
@@ -70,16 +71,16 @@ class CommandBus(QtCore.QObject):
     do_command = Signal(object)
     undo_command = Signal(object)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
 
         self.do_command.connect(lambda cmd: cmd.do(), type=Qt.QueuedConnection)
         self.undo_command.connect(lambda cmd: cmd.undo(), type=Qt.QueuedConnection)
 
-    def do(self, cmd) -> None:
+    def do(self, cmd: str) -> None:
         """Run a command on the main thread"""
         self.do_command.emit(cmd)
 
-    def undo(self, cmd) -> None:
+    def undo(self, cmd: str) -> None:
         """Undo a command on the main thread"""
         self.undo_command.emit(cmd)
