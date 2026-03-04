@@ -739,7 +739,7 @@ class ApplicationContext:
         self.app: ColaApplication | None = None  # ColaApplication
         self.shared_memory = None  # QSharedMemory
         self.command_bus: CommandBus | None = None  # cmd.CommandBus
-        self.git = None  # git.Git
+        self.git: git.Git | None = None
         self.cfg = None  # gitcfg.GitConfig
         self.model: main.MainModel | None = None
         self.notifier = Notifier(self)
