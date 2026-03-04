@@ -745,7 +745,7 @@ class ApplicationContext:
         self.notifier = Notifier(self)
         self.timer: Timer | None = None  # Timer
         self.runtask: qtutils.RunTask | None = None  # qtutils.RunTask
-        self.settings = None  # settings.Settings
+        self.settings: Settings | None = None
         self.selection: selection.SelectionModel | None = None
         self.fsmonitor: _Monitor | None = None
         self.view: MainView | None = None  # QWidget
