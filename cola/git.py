@@ -15,7 +15,7 @@ from .decorators import memoize
 from .interaction import Interaction
 from cola.core import UStr
 from io import BufferedWriter
-from typing import Any, List, Optional, Set, Tuple, Union
+from typing import Any
 
 
 GIT_COLA_TRACE = core.getenv('GIT_COLA_TRACE', '')
@@ -47,7 +47,7 @@ def dashify(value: str) -> str:
     return value.replace('_', '-')
 
 
-def is_git_dir(git_dir: Union[UStr, str]) -> bool:
+def is_git_dir(git_dir: UStr | str) -> bool:
     """From git's setup.c:is_git_directory()."""
     result = False
     if git_dir:
@@ -73,7 +73,7 @@ def is_git_dir(git_dir: Union[UStr, str]) -> bool:
     return result
 
 
-def is_git_file(filename: Union[UStr, str]) -> bool:
+def is_git_file(filename: UStr | str) -> bool:
     return core.isfile(filename) and os.path.basename(filename) == '.git'
 
 
@@ -151,7 +151,7 @@ class Paths:
         # usage: Paths().get()
         return self
 
-    def _search_for_git(self, path: str | UStr, ceiling_dirs: Set[Any]) -> None:
+    def _search_for_git(self, path: str | UStr, ceiling_dirs: set[Any]) -> None:
         """Search for git repositories located at path or above"""
         while path:
             if path in ceiling_dirs:
@@ -202,7 +202,7 @@ class Git:
         self._valid = {}  #: Store the result of is_git_dir() for performance
         self.set_worktree(worktree or core.getcwd())
 
-    def is_git_repository(self, path):
+    def is_git_repository(self, path) -> bool:
         return is_git_repository(path)
 
     def getcwd(self) -> str | UStr:
@@ -244,7 +244,7 @@ class Git:
                 result = common_result
         return result
 
-    def git_dir(self):
+    def git_dir(self) -> str | UStr:
         if not self.paths.git_dir:
             path = core.abspath(core.getcwd())
             self.paths = find_git_directory(path)
@@ -257,18 +257,18 @@ class Git:
 
     @staticmethod
     def execute(
-        command: List[Union[UStr, str]],
-        _add_env: Optional[dict[str, str]] = None,
-        _cwd: Optional[str | UStr] = None,
+        command: list[UStr | str],
+        _add_env: dict[str, str] | None = None,
+        _cwd: str | UStr | None = None,
         _decode: bool = True,
-        _encoding: Optional[str] = None,
+        _encoding: str | None = None,
         _raw: bool = False,
         _stdin: Any = None,
         _stderr: int = subprocess.PIPE,
-        _stdout: Union[BufferedWriter, int] = subprocess.PIPE,
+        _stdout: BufferedWriter | int = subprocess.PIPE,
         _readonly: bool = False,
         _no_win32_startupinfo: bool = False,
-    ) -> Tuple[int, UStr, UStr]:
+    ) -> tuple[int, UStr, UStr]:
         """
         Execute a command and returns its output
 
@@ -408,7 +408,7 @@ def _git_is_installed():
     return result
 
 
-def transform_kwargs(**kwargs) -> List[Union[str, Any]]:
+def transform_kwargs(**kwargs) -> list[str | Any]:
     """Transform kwargs into git command line options
 
     Callers can assume the following behavior:
