@@ -143,7 +143,7 @@ def setup_environment() -> None:
     compat.setenv('GIT_MERGE_AUTOEDIT', 'no')
 
 
-def _get_askpass() -> UStr:
+def _get_askpass() -> str | UStr:
     """Get a default askpass program appropriate for the current environment"""
     git_askpass = core.getenv('GIT_ASKPASS')
     ssh_askpass = core.getenv('SSH_ASKPASS')
