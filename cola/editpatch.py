@@ -1,4 +1,5 @@
 import textwrap
+from typing import Any
 
 from . import core
 from . import diffparse
@@ -8,7 +9,7 @@ from .interaction import Interaction
 from .models import prefs
 
 
-def wrap_comment(context, text):
+def wrap_comment(context, text: str) -> str:
     indent = prefs.comment_char(context) + ' '
     return (
         textwrap.fill(
@@ -21,14 +22,14 @@ def wrap_comment(context, text):
     )
 
 
-def strip_comments(context, text):
+def strip_comments(context, text: str) -> str:
     comment_char = prefs.comment_char(context)
     return '\n'.join(
         line for line in text.split('\n') if not line.startswith(comment_char)
     )
 
 
-def patch_edit_header(context, *, reverse, apply_to_worktree):
+def patch_edit_header(context, *, reverse: bool, apply_to_worktree: bool) -> str:
     if apply_to_worktree:
         header = N_(
             'Edit the following patch, which will then be applied to the worktree to'
@@ -65,7 +66,14 @@ def patch_edit_footer(context):
     return ''.join(wrap_comment(context, part) for part in parts)
 
 
-def edit_patch(patch, encoding, context, *, reverse, apply_to_worktree):
+def edit_patch(
+    patch: diffparse.Patch,
+    encoding: str,
+    context: Any,
+    *,
+    reverse: bool,
+    apply_to_worktree: bool
+):
     patch_file_path = utils.tmp_filename('edit', '.patch')
     try:
         content_parts = [
