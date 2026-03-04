@@ -24,7 +24,7 @@ from .compat import bchr
 from .i18n import N_
 from .interaction import Interaction
 from .models import prefs
-from typing import Dict, Set, Type
+from typing import Any
 
 AVAILABLE = None
 
@@ -56,7 +56,7 @@ class _Monitor(QtCore.QObject):
     files_changed = Signal()
     config_changed = Signal()
 
-    def __init__(self, context, thread_class: Type[_InotifyThread]) -> None:
+    def __init__(self, context, thread_class: type[_InotifyThread]) -> None:
         QtCore.QObject.__init__(self)
         self.context = context
         self._thread_class = thread_class
@@ -298,9 +298,9 @@ if AVAILABLE == 'inotify':
 
         def _refresh_watches(
             self,
-            paths_to_watch: Set[str],
-            wd_to_path_map: Dict[int, str],
-            path_to_wd_map: Dict[str, int],
+            paths_to_watch: set[str],
+            wd_to_path_map: dict[int, str],
+            path_to_wd_map: dict[str, int],
         ) -> None:
             watched_paths = set(path_to_wd_map)
             for path in watched_paths - paths_to_watch:
@@ -418,7 +418,7 @@ if AVAILABLE == 'pywin32':
             except pywintypes.error:
                 pass
 
-        def read(self):
+        def read(self) -> list[Any]:
             if self.handle is None or self.event is None:
                 return []
             if win32event.WaitForSingleObject(self.event, 0) == win32event.WAIT_TIMEOUT:
