@@ -2,9 +2,10 @@ import sys
 
 from qtpy.QtGui import QKeySequence
 from qtpy.QtCore import Qt
+import PyQt5.QtGui
 
 
-def hotkey(*seq):
+def hotkey(*seq) -> PyQt5.QtGui.QKeySequence:
     return QKeySequence(*seq)
 
 
