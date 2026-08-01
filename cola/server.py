@@ -116,7 +116,7 @@ class SocketServer:
 
 
 class SocketClient:
-    def __init__(self, ip: str, port: int = 49178, protocol: str = 'ws'):
+    def __init__(self, ip: str, port: int = 42069, protocol: str = 'ws'):
         self.ip = ip
         self.port = port
         self.protocol = protocol
