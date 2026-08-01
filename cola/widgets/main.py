@@ -34,6 +34,7 @@ from . import clone
 from . import commitmsg
 from . import common
 from . import compare
+from . import connect
 from . import createbranch
 from . import createtag
 from . import dag
@@ -463,6 +464,11 @@ class MainView(standard.MainWindow):
         )
         self.clone_repo_action.setIcon(icons.repo())
 
+        self.connect_action = qtutils.add_action(
+            self, N_('Connect to server'), partial(connect.connect_server, context)
+        )
+        self.connect_action.setIcon(icons.repo())
+
         self.help_docs_action = qtutils.add_action(
             self,
             N_('Documentation'),
@@ -691,6 +697,7 @@ class MainView(standard.MainWindow):
         self.file_menu.addAction(self.new_repository_action)
         self.file_menu.addAction(self.new_bare_repository_action)
         self.file_menu.addAction(self.clone_repo_action)
+        self.file_menu.addAction(self.connect_action)
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.rescan_action)
         self.file_menu.addAction(self.find_files_action)
