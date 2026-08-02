@@ -846,7 +846,7 @@ class ApplicationContext:
         self.runtask: qtutils.RunTask | None = None
         self.settings: Settings | None = None
         self.selection: selection.SelectionModel | None = None
-        self.fsmonitor: fsmonitor._Monitor | None = None
+        self.fsmonitor: fsmonitor.Monitor | None = None
         self.view: ViewType | None = None  # QWidget
         self.browser_windows = []  # list of browse.Browser
 

@@ -1,14 +1,24 @@
 from __future__ import annotations
 import os
+import threading
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from typing import Any
 
+from qtpy import QtCore
+
 from . import core
+from . import fsmonitor
+from . import git
+from . import gitcfg
 from . import utils
 from .operations import IOperations
 
 ENCODING = 'utf-8'
 IS_LOCAL = True
+
+if TYPE_CHECKING:
+    from .fsmonitor import Monitor
 
 
 @dataclass
@@ -17,7 +27,19 @@ class CmdOutputToFile:
     mode: str
 
 
+class MonitorContext:
+    def __init__(self, ops: IOperations) -> None:
+        self.ops = ops
+        self.git: git.Git = None
+        self.cfg: gitcfg.GitConfig = None
+
+
 class LocalOperations(IOperations):
+    def __init__(self) -> None:
+        self._monitor: Monitor = None
+        self._monitor_lock = threading.Lock()
+        self._monitor_state = {'files': False, 'config': False}
+
     def is_remote(self) -> bool:
         return False
 
@@ -129,7 +151,10 @@ class LocalOperations(IOperations):
         return core.expanduser(path)
 
     def run_command(
-        self, cmd: list[core.UStr | str], *args, **kwargs
+        self,
+        cmd: list[core.UStr | str],
+        *args,
+        **kwargs,
     ) -> tuple[int, core.UStr, core.UStr]:
         stdout = None
 
@@ -150,6 +175,44 @@ class LocalOperations(IOperations):
                 return core.run_command(cmd, *args, **kwargs)
         else:
             return core.run_command(cmd, *args, **kwargs)
+
+    def start_monitor(self, worktree: str | None, git_dir: str) -> None:
+        if self._monitor is not None:
+            return
+
+        context = MonitorContext(self)
+        context.git = git.create()
+        context.git.set_worktree(worktree or git_dir)
+        context.cfg = gitcfg.create(context)  # type: ignore[arg-type]
+
+        monitor = fsmonitor.create(context)  # type: ignore[arg-type]
+
+        def mark(kind: str):
+            def handler() -> None:
+                with self._monitor_lock:
+                    self._monitor_state[kind] = True
+
+            return handler
+
+        monitor.files_changed.connect(mark('files'), QtCore.Qt.DirectConnection)
+        monitor.config_changed.connect(mark('config'), QtCore.Qt.DirectConnection)
+        monitor.start()
+        self._monitor = monitor
+
+    def refresh_monitor(self) -> None:
+        if self._monitor is not None:
+            self._monitor.refresh()
+
+    def poll_monitor(self) -> dict:
+        with self._monitor_lock:
+            state = dict(self._monitor_state)
+            self._monitor_state = {'files': False, 'config': False}
+        return state
+
+    def stop_monitor(self) -> None:
+        if self._monitor is not None:
+            self._monitor.stop()
+            self._monitor = None
 
     def get_environ(
         self,

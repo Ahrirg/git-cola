@@ -369,6 +369,38 @@ class RemoteOperations(IOperations):
 
         return status, core.UStr(out, ENCODING), core.UStr(err, ENCODING)
 
+    def start_monitor(self, worktree: str | None, git_dir: str) -> None:
+        data = {
+            'op': 'start_monitor',
+            'args': [],
+            'kwargs': {'worktree': worktree, 'git_dir': git_dir},
+        }
+        return self._send_op(data)
+
+    def refresh_monitor(self) -> None:
+        data = {
+            'op': 'refresh_monitor',
+            'args': [],
+            'kwargs': {},
+        }
+        return self._send_op(data)
+
+    def poll_monitor(self) -> dict:
+        data = {
+            'op': 'poll_monitor',
+            'args': [],
+            'kwargs': {},
+        }
+        return self._send_op(data)
+
+    def stop_monitor(self) -> None:
+        data = {
+            'op': 'stop_monitor',
+            'args': [],
+            'kwargs': {},
+        }
+        return self._send_op(data)
+
     def get_environ(
         self,
     ) -> dict[str, str]:

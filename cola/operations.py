@@ -194,3 +194,19 @@ class IOperations(ABC):
     @abstractmethod
     def tmp_filename(self, label: str, suffix: str = '') -> str:
         pass
+
+    @abstractmethod
+    def start_monitor(self, worktree: str | None, git_dir: str) -> None:
+        pass
+
+    @abstractmethod
+    def refresh_monitor(self) -> None:
+        pass
+
+    @abstractmethod
+    def poll_monitor(self) -> dict:
+        pass
+
+    @abstractmethod
+    def stop_monitor(self) -> None:
+        pass
