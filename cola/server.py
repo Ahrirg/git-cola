@@ -1,8 +1,10 @@
 """ """
 from __future__ import annotations
 import asyncio
+import socket
 import sys
 import threading
+import time
 from typing import Any
 
 try:
@@ -152,6 +154,21 @@ class SyncSocketClient:
 
     def send_message(self, message: str, seq_number: int):
         return self._run(self.client.send_message(message, seq_number))
+
+
+def server_is_up(ip, port=49178, tries=0):
+    cur_try = 0
+    while cur_try <= tries:
+        try:
+            with socket.create_connection((ip, int(port)), timeout=2):
+                return True
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            if tries != 0:
+                time.sleep(1)
+        finally:
+            cur_try = cur_try + 1
+
+    return False
 
 
 def run() -> None:

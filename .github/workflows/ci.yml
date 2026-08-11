@@ -205,3 +205,171 @@ jobs:
           name: Latest
           prerelease: true
           files: dist/git-cola_${{ runner.os }}-${{ runner.arch }}
+
+  server:
+    name: Server (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+            artifact: git-cola_linux-x86_64-server
+
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            artifact: git-cola_linux-arm64-server
+
+          - name: windows-x86_64
+            runner: windows-latest
+            artifact: git-cola_windows-x86_64-server.exe
+
+          - name: macos-arm64
+            runner: macos-latest
+            artifact: git-cola_macos-arm64-server
+
+    steps:
+      - uses: styfle/cancel-workflow-action@0.13.1
+
+      - uses: actions/checkout@v7
+
+      - name: Get current date for caching
+        id: get-date
+        shell: bash
+        run: |
+          echo date=$(date -u +%Y-%m-%d) >> "$GITHUB_OUTPUT"
+
+      - name: Cache Rust and Garden
+        if: runner.os != 'Windows'
+        uses: actions/cache@v6
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.get-date.outputs.date }}
+
+      - name: Install Rust and Garden
+        if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          cargo install garden-tools
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-qtpy \
+            python3-pyqt6 \
+            python3-pyqt6.qtsvg \
+            python3-pyqt6.qtwebengine \
+            python3-send2trash
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew untap aws/tap || true
+          brew install git-cola
+
+      - name: Create Unix virtualenv
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          python3 -m venv env3
+
+      - name: Create Windows virtualenv
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m venv env3
+
+      - name: Install Unix Python dependencies
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -x
+
+          source env3/bin/activate
+
+          python -m pip install --upgrade \
+            pip \
+            setuptools \
+            packaging
+
+          python -m pip install ".[extras]" pyinstaller
+
+      - name: Install Windows Python dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\env3\Scripts\python.exe -m pip install --upgrade `
+            pip `
+            setuptools `
+            packaging
+
+          .\env3\Scripts\python.exe -m pip install `
+            ".[extras]" `
+            pyinstaller
+
+      - name: Build Unix server
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -x
+
+          source env3/bin/activate
+
+          rm -rf build dist
+
+          python -m PyInstaller \
+            --clean \
+            --noconfirm \
+            --onefile \
+            --name git-cola-server \
+            server_entry.py
+
+          mv dist/git-cola-server \
+            "dist/${{ matrix.artifact }}"
+
+      - name: Build Windows server
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+
+          .\env3\Scripts\pyinstaller.exe `
+            --clean `
+            --noconfirm `
+            --onefile `
+            --name git-cola-server `
+            server_entry.py
+
+          Move-Item `
+            dist\git-cola-server.exe `
+            "dist\${{ matrix.artifact }}"
+
+      - name: Upload server artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}-server
+          path: dist/${{ matrix.artifact }}
+
+      - name: Add server binary to latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest
+          prerelease: true
+          files: dist/${{ matrix.artifact }}
