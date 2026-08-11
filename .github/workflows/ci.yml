@@ -103,3 +103,105 @@ jobs:
         with:
           name: git-cola.app
           path: local
+      
+      - name: Create ZIP
+        run: |
+          cd local
+          zip -r git-cola.app.zip git-cola.app
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest
+          prerelease: true
+          files: local/git-cola.app.zip
+ 
+  linux:
+    name: Linux (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: styfle/cancel-workflow-action@0.13.1
+      - uses: actions/checkout@v7
+      - name: Get current date for caching
+        id: get-date
+        shell: bash
+        run: |
+          echo date=$(date -u +%Y-%m-%d) >> $GITHUB_OUTPUT
+      - uses: actions/cache@v6
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.get-date.outputs.date }}
+      - name: Install Rust and Garden
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          cargo install garden-tools
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-qtpy \
+            python3-pyqt6 \
+            python3-pyqt6.qtsvg \
+            python3-pyqt6.qtwebengine \
+            python3-send2trash
+      - name: Install pip-provided dependencies
+        run: |
+          set -x
+          uname -a
+
+          garden dev/virtualenv -vv -D pip-upgrade=true
+          garden dev -vv
+          garden dev/pyqt6 -vv
+
+          source env3/bin/activate
+          python -m pip install pyinstaller
+
+      - name: Build Linux binary
+        shell: bash
+        run: |
+          set -x
+
+          source env3/bin/activate
+
+          rm -rf build dist
+
+          python -m PyInstaller \
+            --clean \
+            --noconfirm \
+            --onefile \
+            --name git-cola \
+            cola/__main__.py
+
+          cp dist/git-cola dist/git-cola_${{ runner.os }}-${{ runner.arch }}
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}
+          path: dist/git-cola
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest
+          prerelease: true
+          files: dist/git-cola_${{ runner.os }}-${{ runner.arch }}
