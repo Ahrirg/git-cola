@@ -2,7 +2,6 @@
 
 Usage: python -m cola
 """
-
 from cola import main
 
 
