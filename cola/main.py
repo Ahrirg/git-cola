@@ -515,6 +515,13 @@ def add_connect_command(subparser: argparse.Action):
         ),
         nargs='?',
     )
+    parser.add_argument(
+        'repo',
+        default=None,
+        metavar='</path/to/repository>',
+        help=('The path to the repository where git-cola initializes'),
+        nargs='?',
+    )
     _add_cola_options(parser)
 
 

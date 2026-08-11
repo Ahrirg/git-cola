@@ -1,6 +1,21 @@
 # Portions Copyright (C) 2023 Quard <2014500726@smail.xtu.edu.cn>
+# Portions Copyright (C) 2024 Kelvin Wuite
+
+import base64
 import os
+import platform
+import select
+import shlex
+import socket
 import sys
+import tempfile
+import threading
+import time
+from collections.abc import Callable
+
+import requests
+from paramiko import AutoAddPolicy
+from paramiko import SSHClient
 
 from qtpy import QtWidgets
 from qtpy.QtCore import QAbstractItemModel
@@ -19,115 +34,513 @@ from ..qtutils import get
 from . import defs
 from . import text
 
+SERVER_EXECUTABLE_URL = 'https://api.github.com/repos/Ahrirg/git-cola/releases'
+
+
+class SSHTunnel:
+    def __init__(
+        self,
+        ssh_host,
+        ssh_user,
+        ssh_password,
+        local_port,
+        remote_host,
+        remote_port,
+        ssh_port=22,
+    ):
+        self.ssh = SSHClient()
+        self.ssh.load_system_host_keys()
+        self.ssh.connect(
+            ssh_host, port=ssh_port, username=ssh_user, password=ssh_password
+        )
+        self.transport = self.ssh.get_transport()
+        self.ssh_host = ssh_host
+
+        self.local_port = local_port
+        self.remote_host = remote_host
+        self.remote_port = remote_port
+        self.server = None
+
+    def handle(self, client):
+        chan = None
+        try:
+            chan = self.transport.open_channel(
+                'direct-tcpip',
+                (self.remote_host, self.remote_port),
+                client.getpeername(),
+            )
+            if chan is None:
+                return
+
+            while True:
+                readable, _, _ = select.select([client, chan], [], [])
+
+                for s in readable:
+                    data = s.recv(4096)
+
+                    if not data:
+                        return
+
+                    if s == client:
+                        chan.sendall(data)
+                    else:
+                        client.sendall(data)
+        finally:
+            if chan:
+                chan.close()
+            client.close()
+
+    def start(self):
+        self.server = socket.socket()
+        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server.bind(('127.0.0.1', self.local_port))
+        self.server.listen(10)
+
+        threading.Thread(
+            target=self.accept_connections,
+            daemon=True,
+        ).start()
+
+    def accept_connections(self):
+        while True:
+            try:
+                client, _ = self.server.accept()
+            except OSError:
+                break
+
+            threading.Thread(
+                target=self.handle,
+                args=(client,),
+                daemon=True,
+            ).start()
+
+    def close(self):
+        if self.server:
+            self.server.close()
+        self.ssh.close()
+
 
 def connect_server(context: ApplicationContext):
-    """Launch a ConnectServerDialog instance"""
-    view = ConnectServerDialog(context, parent=qtutils.active_window())
-    view.show()
-    view.exec_()
-    return view
+    return Dialog.launch(context, ConnectPage())
+
+
+def ssh_server(context: ApplicationContext, ip: str):
+    return Dialog.launch(context, SshPage(ip, 42069))
 
 
 def select_path(
     context: ApplicationContext, ops: operations_remote.RemoteOperations, ip: str
 ):
-    """Launch a SelectPathDialog instance"""
-    view = SelectPathDialog(context, ops, ip, parent=qtutils.active_window())
-    view.show()
-    view.exec_()
-    return view
+    return Dialog.launch(context, PathPage(ops, ip))
 
 
-class ConnectServerDialog(QtWidgets.QDialog):
-    def __init__(self, context: ApplicationContext, parent=None):
+def remote_operations(server_ip: str, server_port):
+    socket = server.SocketClient(server_ip, port=server_port)
+    return operations_remote.RemoteOperations(socket)
+
+
+class Dialog(QtWidgets.QDialog):
+    def __init__(self, context: ApplicationContext, page, parent=None):
         super().__init__(parent)
         self.context = context
-        self.setWindowTitle(N_('Connect to Server Repository'))
+        self.page = None
+        self._pages = {}
         if parent is not None:
             self.setWindowModality(Qt.WindowModal)
 
-        self.server_ip_input = self._create_lineedit(context, N_('e.g. 192.168.1.1'))
+        self._stack = QtWidgets.QStackedWidget()
 
-        self.server_port = self._create_lineedit(context, N_('42069'))
-
-        self.connect_button = qtutils.create_button(
-            text=N_('Connect'), icon=icons.ok(), default=True
+        self.accept_button = qtutils.create_button(
+            text=N_('Select'), icon=icons.ok(), default=True
         )
         self.exit_button = qtutils.create_button(text=N_('Exit'), icon=icons.close())
-
-        self._form = qtutils.form(
-            defs.margin,
-            defs.spacing,
-            (N_('Server IP'), self.server_ip_input),
-            (N_('Server Port'), self.server_port),
-        )
 
         self._button_layout = qtutils.hbox(
             defs.no_margin,
             defs.button_spacing,
             qtutils.STRETCH,
             self.exit_button,
-            self.connect_button,
+            self.accept_button,
         )
 
         self._layout = qtutils.vbox(
-            defs.margin, defs.spacing, self._form, self._button_layout
+            defs.margin, defs.spacing, self._stack, self._button_layout
         )
         self.setLayout(self._layout)
 
-        qtutils.connect_button(self.connect_button, self.on_connect)
+        qtutils.connect_button(self.accept_button, self._on_accept)
         qtutils.connect_button(self.exit_button, self.reject)
         qtutils.add_close_action(self)
 
         self.resize(400, 150)
+        self.set_page(page)
 
-    def _create_lineedit(self, context: ApplicationContext, hint: str):
-        widget = text.HintedLineEdit(context, hint)
+    @classmethod
+    def launch(cls, context: ApplicationContext, page):
+        view = cls(context, page, parent=qtutils.active_window())
+        view.show()
+        view.exec_()
+        return view
+
+    def set_page(self, page):
+        widget = self._pages.get(id(page))
+        if widget is None:
+            widget = QtWidgets.QWidget(self)
+            widget.setLayout(
+                qtutils.form(defs.no_margin, defs.spacing, *page.build(self))
+            )
+            self._pages[id(page)] = widget
+            self._stack.addWidget(widget)
+
+        self.page = page
+        self._stack.setCurrentWidget(widget)
+        self.setWindowTitle(page.title)
+        self.accept_button.setText(page.accept_text)
+        page.activate(self)
+
+    def _on_accept(self):
+        self.page.on_accept(self, self.context)
+
+    def create_lineedit(self, hint: str, hidden: bool = False):
+        widget = text.HintedLineEdit(self.context, hint)
         width = qtutils.text_width(widget.font(), 'M')
         widget.setMinimumWidth(width * 32)
+        if hidden:
+            widget.setEchoMode(QtWidgets.QLineEdit.Password)
         return widget
 
-    def on_connect(self):
+    def warn(self, title: str, message: str):
+        QtWidgets.QMessageBox.warning(self, title, message)
+
+    def error(self, title: str, message: str):
+        QtWidgets.QMessageBox.critical(self, title, message)
+
+
+class Page:
+    def build(self, dialog: Dialog):
+        return ()
+
+    def activate(self, dialog: Dialog):
+        pass
+
+    def on_accept(self, dialog: Dialog, context: ApplicationContext):
+        raise NotImplementedError
+
+
+class ConnectPage(Page):
+    def __init__(self) -> None:
+        self.title = N_('Connect to Server Repository')
+        self.accept_text = N_('Connect')
+
+    def build(self, dialog: Dialog):
+        self.server_ip_input = dialog.create_lineedit(N_('e.g. 192.168.1.1'))
+        self.server_port = dialog.create_lineedit(N_(str(42069)))
+        return (
+            (N_('Server IP'), self.server_ip_input),
+            (N_('Server Port'), self.server_port),
+        )
+
+    def activate(self, dialog: Dialog):
+        self.server_ip_input.setFocus()
+
+    def on_accept(self, dialog: Dialog, context: ApplicationContext):
         server_ip = get(self.server_ip_input)
-        server_port = get(self.server_port, default=42069)
+        if not server_ip:
+            dialog.warn(self.title, N_('A server address is required.'))
+            return
+
+        server_port = get(self.server_port) or 42069
+
+        if server.server_is_up('127.0.0.1'):
+            dialog.set_page(PathPage.for_server('127.0.0.1', server_port))
+        else:
+            print(f'server ip = {server_ip}')
+            dialog.set_page(SshPage(server_ip, server_port))
+
+
+def run_cmd(ssh: SSHClient, command: str) -> tuple[str, str]:
+    _, stdout, stderr = ssh.exec_command(command)
+    stdout.channel.recv_exit_status()
+    return stdout.read().decode(), stderr.read().decode()
+
+
+class SshPage(Page):
+    def __init__(self, ip: str, port=42069):
+        self.title = N_('pipe git-cola to server')
+        self.accept_text = N_('Connect')
+        self.ip = ip
+        self.port = port
+        self.system = ''
+        self.machine = ''
+
+    def build(self, dialog: Dialog):
+        self.username_input = dialog.create_lineedit(N_(''))
+        self.password_input = dialog.create_lineedit(N_(''), hidden=True)
+        return (
+            (N_('Username'), self.username_input),
+            (N_('Password'), self.password_input),
+        )
+
+    def activate(self, dialog: Dialog):
+        self.username_input.setFocus()
+
+    def download_executable(self, ssh: SSHClient):
+        executable = ''
+        if self.system == 'Linux':
+            executable = f'git-cola-server-{self.get_hash()}'
+        if self.system == 'Windows':
+            executable = f'git-cola-server-{self.get_hash()}.exe'
+        if self.system == 'Darwin':
+            executable = f'git-cola-server-{self.get_hash()}.app.zip'
+
+        if platform.system() in ('Linux', 'Darwin'):
+            executable_path = f'/tmp/{executable}'
+
+        if platform.system() == 'Windows':
+            executable_path = os.path.join(tempfile.gettempdir(), executable)
+
+        response = requests.get(self.get_url(), timeout=30)
+        response.raise_for_status()
+
+        with open(executable_path, 'wb') as f:
+            f.write(response.content)
+
+        sftp = ssh.open_sftp()
+        sftp.put(executable_path, self.get_expected_path(executable))
+
+        if self.system == 'Darwin':
+            ssh.exec_command('unzip -o /tmp/git-cola.app.zip -d /tmp')
+
+    def on_accept(self, dialog: Dialog, context: ApplicationContext):
+        username = get(self.username_input)
+        password = get(self.password_input)
+
+        if not username or not password:
+            dialog.warn(N_('SSH'), N_('Username and password are required.'))
+            return
+
+        if server.server_is_up('127.0.0.1'):
+            dialog.set_page(PathPage.for_server('127.0.0.1', self.port))
+            return
+
+        ssh = SSHClient()
+        ssh.set_missing_host_key_policy(AutoAddPolicy())
+        try:
+            ssh.connect(
+                hostname=str(self.ip),
+                port=22,
+                username=username,
+                password=password,
+            )
+            self.get_platform(lambda cmd: run_cmd(ssh, cmd))
+
+            test_command, chmod_command, start_command = self.get_command()
+
+            _, stdout, stderr = ssh.exec_command(test_command)
+
+            exit_code = stdout.channel.recv_exit_status()
+            if exit_code != 0:
+                self.download_executable(ssh)
+                ssh.exec_command(chmod_command)
+
+            _, stdout, stderr = ssh.exec_command(start_command)
+
+        except Exception as e:
+            dialog.error(N_('SSH'), f'SSH error: {e}')
+            return
+        finally:
+            for _ in range(10):
+                _, stdout, _ = ssh.exec_command(f'ss -ltnp | grep {self.port}')
+                if stdout.channel.recv_exit_status() == 0:
+                    break
+                time.sleep(1)
+            ssh.close()
+
+        tunnel = SSHTunnel(
+            ssh_host=self.ip,
+            ssh_user=username,
+            ssh_password=password,
+            local_port=self.port,
+            remote_host='localhost',
+            remote_port=self.port,
+        )
+        tunnel.start()
+
+        if server.server_is_up('127.0.0.1', tries=20):
+            dialog.set_page(PathPage.for_server('127.0.0.1', self.port))
+        else:
+            dialog.error(N_('SSH'), N_('Server could not be reached.'))
+
+    def get_platform(self, run_cmd: Callable) -> None:
+        stdout, _ = run_cmd('uname -s && uname -m')
+        lines = stdout.strip().splitlines()
+
+        if len(lines) != 2:
+            stdout, _ = run_cmd('echo Windows^|%PROCESSOR_ARCHITECTURE%')
+            lines = stdout.strip().replace('Windows_NT', 'Windows').split('|')
+
+        if len(lines) != 2:
+            raise Exception('Unsupported system')
+
+        system, machine = lines
+
+        if machine in ('aarch64', 'arm64', 'ARM64'):
+            self.machine = 'ARM64'
+        if machine in ('AMD64', 'x86_64'):
+            self.machine = 'x86_64'
+
+        if system in ('Linux', 'Darwin', 'Windows'):
+            self.system = system
+            return
+
+        raise Exception(f'Unsupported system: {system} {machine}')
+
+    def get_expected_path(self, executable_name: str) -> str:
+        if self.system == 'Linux' or self.system == 'Darwin':
+            return f'/tmp/{executable_name}'
+        if self.system == 'Windows':
+            return rf'C:\Users\{get(self.username_input)}\AppData\Local\Temp\{executable_name}'
+
+        raise Exception('Unsupported system')
+
+    def get_executable_name(self) -> str:
+        if self.system == 'Linux':
+            return f'git-cola_linux-{self.machine}-server'
+        if self.system == 'Windows':
+            return f'git-cola_windows-{self.machine}-server.exe'
+        if self.system == 'Darwin':
+            return 'git-cola.app.zip'
+
+        raise Exception('System not supported')
+
+    def get_hash(self) -> str:
+        asset_name = self.get_executable_name()
+
+        response = requests.get(SERVER_EXECUTABLE_URL, timeout=10)
+        response.raise_for_status()
+        releases = response.json()
+
+        cur_release = None
+        for release in releases:
+            if release.get('prerelease'):
+                cur_release = release
+                break
+
+        if cur_release is None:
+            raise Exception('Release was not found')
+
+        for asset in cur_release.get('assets', []):
+            if asset['name'] == asset_name:
+                digest = asset.get('digest')
+
+                if digest and digest.startswith('sha256:'):
+                    return digest.removeprefix('sha256:')
+
+                raise Exception(f'No SHA-256 digest for {asset_name}')
+
+        raise Exception(f'No prerelease asset found for {self.system} {self.machine}')
+
+    def get_url(self) -> str:
+        response = requests.get(SERVER_EXECUTABLE_URL, timeout=10)
+        response.raise_for_status()
+        releases = response.json()
+
+        cur_release = None
+        for release in releases:
+            if release.get('prerelease'):
+                cur_release = release
+                break
+
+        if cur_release is None:
+            raise Exception('Release was not found')
+
+        url = None
+        executable_name = self.get_executable_name()
+        for asset in cur_release.get('assets'):
+            if asset.get('name') == executable_name:
+                url = asset.get('browser_download_url', None)
+
+        if not url:
+            raise Exception(f'No release found for {self.system} {self.machine}')
 
         try:
-            socket = server.SocketClient(server_ip, port=server_port)
-            ops = operations_remote.RemoteOperations(socket)
-            select_path(self.context, ops, server_ip)
-        except Exception as e:
-            # TODO pipe gitcola to server if we cant establish connection with it
-            print(e)
-        finally:
-            self.accept()
+            response = requests.head(url, allow_redirects=True, timeout=10)
+            if response.status_code == 200:
+                return url
+        except requests.RequestException as e:
+            raise Exception(f'Unsupported system: {e}')
+
+        raise Exception(f'No release found for {self.system} {self.machine}')
+
+    def get_command(self) -> tuple[str, str, str]:
+        remote_dir = '/tmp'
+        remote_executable = f'{remote_dir}/git-cola-server-{self.get_hash()}'
+
+        if self.system == 'Linux':
+            test_command = f'test -f {remote_executable}'
+
+            chmod_command = f"chmod 700 {shlex.quote(f'{remote_executable}')}"
+
+            start_command = f'nohup setsid {shlex.quote(remote_executable)} server ' f'> {shlex.quote(remote_dir)}/server.log ' f'2>&1 < /dev/null &'
+
+            return test_command, chmod_command, start_command
+
+        if self.system == 'Darwin':
+            test_command = f'test -f {remote_executable}'
+
+            chmod_command = f"chmod 700 {shlex.quote(f'{remote_executable}/git-cola')}"
+
+            start_command = f'nohup {shlex.quote(remote_dir)}/git-cola.app/Contents/MacOS/git-cola server ' f'>{shlex.quote(remote_dir)}/server.log 2>&1 </dev/null &'
+
+            return test_command, chmod_command, start_command
+
+        if self.system == 'Windows':
+            remote_dir = rf'C:\Users\{get(self.username_input)}\AppData\Local\Temp'
+            remote_executable = rf'{remote_dir}\git-cola-server-{self.get_hash()}.exe'
+
+            test_command = f'powershell -NoProfile -Command ' f"\"if (Test-Path -LiteralPath '{remote_executable}') " f'{{ exit 0 }} else {{ exit 1 }}"'
+            chmod_command = ''
+
+            ps = r"""
+                    $d = $env:TEMP
+                    $exe = Join-Path $d 'git-cola-server.exe'
+                    $out = Join-Path $d 'server.out.log'
+                    $err = Join-Path $d 'server.err.log'
+
+                    $line = 'cmd /c ""' + $exe + '" server >"' + $out + '" 2>"' + $err + '""'
+
+                    Invoke-CimMethod `
+                        -ClassName Win32_Process `
+                        -MethodName Create `
+                        -Arguments @{ CommandLine = $line } |
+                        Select-Object ProcessId, ReturnValue
+                """
+            blob = base64.b64encode(ps.encode('utf-16-le')).decode()
+            start_command = f'powershell -NoProfile -EncodedCommand {blob}'
+
+            return test_command, chmod_command, start_command
+
+        raise Exception(f'Unsupported system: {self.system}')
 
 
-class SelectPathDialog(QtWidgets.QDialog):
-    def __init__(
-        self,
-        context: ApplicationContext,
-        ops: operations_remote.RemoteOperations,
-        ip: str,
-        parent=None,
-    ):
-        super().__init__(parent)
-        self.context = context
-        self.server_ip = ip
+class PathPage(Page):
+    def __init__(self, ops: operations_remote.RemoteOperations, ip: str):
+        self.title = N_('Select Path To Repository')
+        self.accept_text = N_('Select')
         self.ops = ops
-        self.setWindowTitle(N_('Select Path To Repository'))
-        if parent is not None:
-            self.setWindowModality(Qt.WindowModal)
+        self.server_ip = ip
 
-        self.repo_path_input = self._create_lineedit(context, N_('e.g. /path/to/repo'))
+    @classmethod
+    def for_server(cls, server_ip: str, server_port):
+        ops = remote_operations(server_ip, server_port)
+        return cls(ops, f'{server_ip}:{server_port}')
+
+    def build(self, dialog: Dialog):
+        self.repo_path_input = dialog.create_lineedit(N_('e.g. /path/to/repo'))
 
         self.browse_button = QtWidgets.QPushButton('...')
         self.browse_button.setMaximumWidth(30)
-        self.browse_button.clicked.connect(self.on_browse)
-
-        self.connect_button = qtutils.create_button(
-            text=N_('Select'), icon=icons.ok(), default=True
-        )
-        self.exit_button = qtutils.create_button(text=N_('Exit'), icon=icons.close())
+        self.browse_button.clicked.connect(lambda: self.on_browse(dialog))
 
         input_layout = qtutils.hbox(
             defs.no_margin,
@@ -135,53 +548,35 @@ class SelectPathDialog(QtWidgets.QDialog):
             self.repo_path_input,
             self.browse_button,
         )
+        return ((N_('Path to Repo'), input_layout),)
 
-        self._form = qtutils.form(
-            defs.margin,
-            defs.spacing,
-            (N_('Path to Repo'), input_layout),
-        )
+    def activate(self, dialog: Dialog):
+        self.repo_path_input.setFocus()
 
-        self._button_layout = qtutils.hbox(
-            defs.no_margin,
-            defs.button_spacing,
-            qtutils.STRETCH,
-            self.exit_button,
-            self.connect_button,
-        )
-
-        self._layout = qtutils.vbox(
-            defs.margin, defs.spacing, self._form, self._button_layout
-        )
-        self.setLayout(self._layout)
-
-        qtutils.connect_button(self.connect_button, self.on_connect)
-        qtutils.connect_button(self.exit_button, self.reject)
-        qtutils.add_close_action(self)
-
-        self.resize(400, 150)
-
-    def _create_lineedit(self, context: ApplicationContext, hint: str):
-        widget = text.HintedLineEdit(context, hint)
-        width = qtutils.text_width(widget.font(), 'M')
-        widget.setMinimumWidth(width * 32)
-        return widget
-
-    def on_browse(self):
-        dialog = RemoteFileBrowserDialog(self.context, self.ops, parent=self)
-        if dialog.exec_() == QtWidgets.QDialog.Accepted:
-            selected_path = dialog.selected_path()
+    def on_browse(self, dialog: Dialog):
+        browser = RemoteFileBrowserDialog(dialog.context, self.ops, parent=dialog)
+        if browser.exec_() == QtWidgets.QDialog.Accepted:
+            selected_path = browser.selected_path()
             if selected_path:
                 self.repo_path_input.setText(selected_path)
 
-    def on_connect(self):
+    def on_accept(self, dialog: Dialog, context: ApplicationContext):
         repo_path = get(self.repo_path_input)
+        if not repo_path:
+            dialog.warn(self.title, N_('A repository path is required.'))
+            return
 
-        core.fork(
-            [sys.executable, '-m', 'cola', 'connect', self.server_ip, repo_path],
-            cwd=os.path.expanduser('~'),
-        )
-        self.accept()
+        cmd = [
+            sys.executable,
+            '-m',
+            'cola',
+            'connect',
+            self.server_ip,
+            repo_path,
+        ]
+        core.fork(cmd, cwd=os.getcwd())
+
+        dialog.accept()
         QtWidgets.QApplication.quit()
 
 
