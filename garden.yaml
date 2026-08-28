@@ -316,9 +316,9 @@ trees:
         flatpak install --user \
         org.flatpak.Builder/x86_64 \
         org.freedesktop.Sdk.Extension.rust-stable/x86_64/25.08 \
-        org.kde.Sdk/x86_64/6.10 \
-        org.kde.Platform/x86_64/6.10 \
-        com.riverbankcomputing.PyQt.BaseApp/x86_64/6.10
+        org.kde.Sdk/x86_64/6.11 \
+        org.kde.Platform/x86_64/6.11 \
+        com.riverbankcomputing.PyQt.BaseApp/x86_64/6.11
     url: "${gh-https}/flathub/com.github.git_cola.git-cola.git"
     remotes:
       erick555: "${gh-https}/Erick555/com.github.git_cola.git-cola.git"
