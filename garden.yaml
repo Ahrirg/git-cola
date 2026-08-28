@@ -301,7 +301,10 @@ trees:
     variables:
       app-id: com.github.git_cola.git-cola
     commands:
-      build: flatpak-builder "$@" --user "${prefix}" "${app-id}.yml"
+      build/full: flatpak-builder "$@" --ccache --user "${prefix}" "${app-id}.yml"
+      build: |
+        flatpak-builder "$@" \
+            --skip-if-unchanged --keep-build-dirs --build-only --ccache --user "${prefix}" "${app-id}.yml"
       check: |
         flatpak run --command=flatpak-builder-lint \
             org.flatpak.Builder "$@" --exceptions builddir "${prefix}"
@@ -312,9 +315,10 @@ trees:
         flathub https://flathub.org/repo/flathub.flatpakrepo
         flatpak install --user \
         org.flatpak.Builder/x86_64 \
-        org.kde.Sdk/x86_64/6.9 \
-        org.kde.Platform/x86_64/6.9 \
-        com.riverbankcomputing.PyQt.BaseApp/x86_64/6.9
+        org.freedesktop.Sdk.Extension.rust-stable/x86_64/25.08 \
+        org.kde.Sdk/x86_64/6.10 \
+        org.kde.Platform/x86_64/6.10 \
+        com.riverbankcomputing.PyQt.BaseApp/x86_64/6.10
     url: "${gh-https}/flathub/com.github.git_cola.git-cola.git"
     remotes:
       erick555: "${gh-https}/Erick555/com.github.git_cola.git-cola.git"
