@@ -2,7 +2,8 @@ import multiprocessing
 import os
 import time
 
-from cola import operations
+from cola import operations_local
+from cola import operations_remote
 from cola import server
 
 
@@ -17,8 +18,8 @@ class create_test_server:
     def __enter__(self):
         port = int(os.environ.get('GIT_COLA_TEST_SERVER_PORT', 49178))
         self.socket = server.SocketClient(ip='127.0.0.1', port=port)
-        self.ops_remote = operations.RemoteOperations(self.socket)
-        self.ops_local = operations.LocalOperations()
+        self.ops_remote = operations_remote.RemoteOperations(self.socket)
+        self.ops_local = operations_local.LocalOperations()
         return self
 
     def __exit__(self, exc_type, exc, tb):
