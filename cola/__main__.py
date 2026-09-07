@@ -2,8 +2,10 @@
 
 Usage: python -m cola
 """
+import sys
 
 from cola import main
+from cola.server import run as serverrun
 
 
 def run() -> None:
@@ -12,4 +14,7 @@ def run() -> None:
 
 
 if __name__ == '__main__':
-    run()
+    if len(sys.argv) > 1 and sys.argv[1] == 'server':
+        serverrun()
+    else:
+        run()
