@@ -3,6 +3,13 @@ Upcoming
 
 Usability, bells and whistles
 -----------------------------
+* Git Cola now has a server mode that allows you to connect to sessions running on
+  remote machines. ``git cola server`` can be used used to start a cola server and
+  ``git cola connect`` can connect to it.
+  (`#1540 <https://github.com/git-cola/git-cola/issues/1540>`_)
+  (`#1617 <https://github.com/git-cola/git-cola/pull/1617>`_)
+  (`#1645 <https://github.com/git-cola/git-cola/pull/1645>`_)
+
 * The dialog that appears when reverting worktree edits now includes a diff
   preview of the content that will be reverted.
   (`#1621 <https://github.com/git-cola/git-cola/pull/1621>`_)
@@ -17,10 +24,100 @@ Usability, bells and whistles
   A future change will add Undo and Redo support to the application.
   (`#1619 <https://github.com/git-cola/git-cola/pull/1619>`_)
 
+* Git Cola now avoids taking optional locks that can interact with
+  external ``git`` processes.
+  (`#1618 <https://github.com/git-cola/git-cola/pull/1618>`_)
+
+* The text truncation that is used on some displays, for example
+  in the startup dialog when selecting repositories, would sometimes
+  truncate text in such a way that made the entries ambiguous.
+  A new `Text Elide Mode` preference in the settings allows
+  the truncation to be configured.
+  (`#1627 <https://github.com/git-cola/git-cola/issues/1627>`_)
+  (`#1629 <https://github.com/git-cola/git-cola/pull/1629>`_)
+
+* Appearance settings can now be configured to affect either
+  "All Repositories" or just the current repository.
+  (`#1578 <https://github.com/git-cola/git-cola/issues/1578>`_)
+  (`#1623 <https://github.com/git-cola/git-cola/pull/1623>`_)
+
+* Work-in-progress commit messages are now stored per-worktree.
+  Switching worktrees will now preserve the commit message that
+  was associated with the specific worktree. The file used for
+  storing work-in-progress commit messages can be found at
+  ``git rev-parse --git-path GIT_COLA_MSG``.
+  (`#1626 <https://github.com/git-cola/git-cola/pull/1626>`_)
+
+* The `Commit` buttons now shows the correct shortcut on macOS and uses an
+  icon for the Cmd modifier instead of the mnemonic name.
+  (`#1636 <https://github.com/git-cola/git-cola/pull/1636>`_)
+
+* Git DAG's commit list and label rendering is now faster.
+  (`#1638 <https://github.com/git-cola/git-cola/pull/1638>`_)
+
+* The diff editor now displays a usage hint when its contents are empty, for
+  example when the tool is first displayed.
+  (`#1639 <https://github.com/git-cola/git-cola/pull/1639>`_)
+
+* The Diff Options menu's layout was improved so that its custom widgets fit in
+  better within the menu.
+  (`#1640 <https://github.com/git-cola/git-cola/pull/1640>`_)
+
+* The Status tool's behavior when staging multiple items was improved so that the
+  post-staged selection is more intuitive and predictable.
+  (`#1641 <https://github.com/git-cola/git-cola/pull/1641>`_)
+
+* The Editor, History Browser, Mergetool, and Difftool configuration
+  can now be overridden for just Git Cola using a new set of ``cola.*``
+  override variables. This allows you to use a distinct set of tools
+  just for Git Cola without affecting the core Git configuration.
+  (`#1632 <https://github.com/git-cola/git-cola/issues/1632>`_)
+  (`#1642 <https://github.com/git-cola/git-cola/pull/1642>`_)
+
+* The Diff editor's Image Diff mode improved its image rendering for
+  ``*.svg`` vector images to reduce blurriness.
+  (`#1643 <https://github.com/git-cola/git-cola/pull/1643>`_)
+
+* Git Cola now provides a ``GIT_COLA`` environment variable so that
+  custom ``.git/hooks``, editors, difftools, and other user-configurable
+  tools and commands can detect that ``git`` is being executed by
+  Git Cola. The ``GIT_COLA`` environment variable contains the absolute path to
+  the ``git-cola`` command.
+
+* Git DAG now provides a ``GIT_DAG`` environment variable in its
+  environment with the absolute path to the ``git-dag`` command.
+  This is Git DAG's equivalent to the ``GIT_COLA`` variable.
+
+* Errors are now reported when a repository cannot be opened due to ``safe.directory``.
+  (`#1654 <https://github.com/git-cola/git-cola/pull/1654>`_)
+  (`#1646 <https://github.com/git-cola/git-cola/issues/1646>`_)
+
+Fixes
+-----
+* Corrected an incorrect import in the Apply Patches feature.
+  (`#1630 <https://github.com/git-cola/git-cola/pull/1630>`_)
+
+* The diff tool's line number style is now refreshed when changing palettes.
+  (`#1633 <https://github.com/git-cola/git-cola/pull/1633>`_)
+
+* The `resources` module was not considering when the package was installed into
+  the conventional Python ``dist-packages`` area, which is used on Debian and
+  other distros. Only ``site-packages`` was being considered.
+  (`#1652 <https://github.com/git-cola/git-cola/pull/1652>`_)
+
+* The inotify filesystem monitor could sometimes cause a crash when ignored
+  paths are removed in the background.
+  (`#1655 <https://github.com/git-cola/git-cola/issues/1655>`_)
+
 Translations
 ------------
 * Updated French translation.
   (`#1608+ <https://github.com/git-cola/git-cola/pull/1608#pullrequestreview-4688968144>`_)
+
+Development
+-----------
+* Type hints were improved.
+  (`#1637 <https://github.com/git-cola/git-cola/pull/1637>`_)
 
 
 .. _v4.19.0:
@@ -2996,7 +3093,7 @@ Fixes
   (`#548 <https://github.com/git-cola/git-cola/issues/548>`_)
 
 * `git cola` now cleans up after itself immediately to avoid leaving behind
-  empty `/tmp/git-cola-XXXXXX` directories when the user uses `Ctrl+C`
+  empty ``/tmp/git-cola-*`` directories when the user uses `Ctrl+C`
   to quit the app.
   (`#566 <https://github.com/git-cola/git-cola/issues/566>`_)
 

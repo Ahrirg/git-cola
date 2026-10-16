@@ -7,8 +7,8 @@ from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
 
+from .. import cmd
 from .. import cmds
-from .. import core
 from .. import difftool
 from .. import gitcmds
 from .. import hotkeys
@@ -21,6 +21,7 @@ from ..models import dag
 from ..models.browse import GitRepoModel
 from ..models.browse import GitRepoNameItem
 from ..models.selection import State
+from ..operations import CmdOutputToFile
 from . import common
 from . import defs
 from . import standard
@@ -57,9 +58,6 @@ def save_path(context, path, model):
 class Browser(standard.Widget):
     """A repository branch file browser. Browses files provided by GitRepoModel"""
 
-    # Read-only mode property
-    mode = property(lambda self: self.model.mode)
-
     def __init__(self, context, parent, update=True):
         standard.Widget.__init__(self, parent)
         self.tree = RepoTreeView(context, self)
@@ -67,6 +65,7 @@ class Browser(standard.Widget):
         self.setLayout(self.mainlayout)
 
         self.model = context.model
+        self.context = context
         self.model.updated.connect(self._updated_callback, type=Qt.QueuedConnection)
         if parent is None:
             qtutils.add_close_action(self)
@@ -85,7 +84,7 @@ class Browser(standard.Widget):
 
     def _updated_callback(self):
         branch = self.model.currentbranch
-        curdir = core.getcwd()
+        curdir = self.context.ops.getcwd()
         msg = N_('Repository: %s') % curdir
         msg += '\n'
         msg += N_('Branch: %s') % branch
@@ -96,8 +95,8 @@ class Browser(standard.Widget):
             'branch': branch,
         }
         title = N_('%(project)s: %(branch)s - Browse') % scope
-        if self.mode == self.model.mode_amend:
-            title += ' %s' % N_('(Amending)')
+        if self.model.mode == self.model.mode_amend:
+            title += ' {}'.format(N_('(Amending)'))
         self.setWindowTitle(title)
 
 
@@ -473,7 +472,7 @@ class RepoTreeView(standard.TreeView):
 
     def paths_from_indexes(self, indexes):
         return qtutils.paths_from_indexes(
-            self.model(), indexes, item_type=GitRepoNameItem.TYPE
+            self.context, self.model(), indexes, item_type=GitRepoNameItem.TYPE
         )
 
     def selected_paths(self):
@@ -563,12 +562,14 @@ class BrowseModel:
         self.filename = filename
 
 
-class SaveBlob(cmds.ContextCommand):
+class SaveBlob(cmd.Command):
+    UNDOABLE = False
+
     def __init__(self, context, model):
         super().__init__(context)
         self.browse_model = model
 
-    def do(self):
+    def do(self) -> bool:
         model = self.browse_model
         if model.ref == dag.WORKTREE:
             try:
@@ -578,11 +579,7 @@ class SaveBlob(cmds.ContextCommand):
             except OSError as error:
                 err = f'\n{error}'
                 status = 1
-            out = '# shutil.copy2({}, {}){}'.format(
-                shlex.quote(model.relpath),
-                shlex.quote(model.filename),
-                err,
-            )
+            out = f'# shutil.copy2({shlex.quote(model.relpath)}, {shlex.quote(model.filename)}){err}'
             Interaction.command(
                 N_('Error Saving File'), 'shutil.copy2', status, out, err
             )
@@ -592,19 +589,16 @@ class SaveBlob(cmds.ContextCommand):
             else:
                 model_ref = model.ref
             ref = f'{model_ref}:{model.relpath}'
-            with core.xopen(model.filename, 'wb') as fp:
-                status, output, err = self.context.git.cat_file('blob', ref, _stdout=fp)
-
-            out = '# git cat-file blob {} >{}\n{}'.format(
-                shlex.quote(ref),
-                shlex.quote(model.filename),
-                output,
+            status, output, err = self.context.git.cat_file(
+                'blob', ref, _stdout=CmdOutputToFile(model.filename, 'wb')
             )
+
+            out = f'# git cat-file blob {shlex.quote(ref)} >{shlex.quote(model.filename)}\n{output}'
             Interaction.command(
                 N_('Error Saving File'), 'git cat-file', status, out, err
             )
         if status != 0:
-            return
+            return False
 
         msg = N_('Saved "%(filename)s" from "%(ref)s" to "%(destination)s"') % {
             'filename': model.relpath,
@@ -616,6 +610,7 @@ class SaveBlob(cmds.ContextCommand):
         Interaction.information(
             N_('File Saved'), N_('File saved to "%s"') % model.filename
         )
+        return True
 
 
 class BrowseBranch(standard.Dialog):

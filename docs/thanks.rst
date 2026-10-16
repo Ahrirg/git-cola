@@ -27,6 +27,7 @@ Thanks
 * Andrej Kvasnica
 * Andrew Chen
 * Andrew Hemming
+* Andrey Voitov
 * Andy O'Neill
 * armandg
 * Arthur Coelho
@@ -148,6 +149,7 @@ Thanks
 * jfessard
 * JiCiT
 * Jimmy M. Coleman
+* JimmyO-GH
 * Joachim Jablon
 * Joachim Lusiardi
 * Joel Barrios
@@ -160,6 +162,7 @@ Thanks
 * Kai Krakow
 * Karl Bielefeldt
 * Karthik Manamcheri
+* Karunya Muddana
 * Katsuhiko Takahashi
 * Kelvie Wong
 * Kerrick Staley

@@ -2,12 +2,13 @@ import sys
 from typing import Any
 
 from qtpy import QtCore
+from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
 
 from .. import core
 from .. import hidpi
-from .. import utils
 from ..cmd import Command
+from ..i18n import N_
 
 ABBREV = 'core.abbrev'
 ASPELL_ENABLED = 'cola.aspell.enabled'
@@ -27,8 +28,10 @@ COMMIT_CLEANUP = 'commit.cleanup'
 DICTIONARY = 'cola.dictionary'
 DIFFCONTEXT = 'gui.diffcontext'
 DIFFTOOL = 'diff.tool'
+OVERRIDE_DIFFTOOL = 'cola.difftool'
 DISPLAY_UNTRACKED = 'gui.displayuntracked'
 EDITOR = 'gui.editor'
+OVERRIDE_EDITOR = 'cola.editor'
 ENABLE_GRAVATAR = 'cola.gravatar'
 ENABLE_POPUPS = 'cola.enablepopups'
 EXPANDTAB = 'cola.expandtab'
@@ -37,6 +40,7 @@ FONTDIFF = 'cola.fontdiff'
 FONTSIZE = 'cola.fontsize'
 HIDPI = 'cola.hidpi'
 HISTORY_BROWSER = 'gui.historybrowser'
+OVERRIDE_HISTORY_BROWSER = 'cola.historybrowser'
 HTTP_PROXY = 'http.proxy'
 ICON_THEME = 'cola.icontheme'
 INOTIFY = 'cola.inotify'
@@ -51,6 +55,7 @@ MERGE_KEEPBACKUP = 'merge.keepbackup'
 MERGE_SUMMARY = 'merge.summary'
 MERGE_VERBOSITY = 'merge.verbosity'
 MERGETOOL = 'merge.tool'
+OVERRIDE_MERGETOOL = 'cola.mergetool'
 MOUSE_ZOOM = 'cola.mousezoom'
 PATCHES_DIRECTORY = 'cola.patchesdirectory'
 PULL_REBASE = 'pull.rebase'
@@ -67,6 +72,7 @@ STATUS_SHOW_TOTALS = 'cola.statusshowtotals'
 THEME = 'cola.theme'
 TABWIDTH = 'cola.tabwidth'
 TEXTWIDTH = 'cola.textwidth'
+TEXT_ELIDE_MODE = 'cola.textelidemode'
 USER_EMAIL = 'user.email'
 USER_NAME = 'user.name'
 UPDATE_INDEX = 'cola.updateindex'
@@ -187,6 +193,7 @@ class Defaults:
     patches_directory = 'patches'
     status_indent = False
     status_show_totals = False
+    text_elide_mode = 'middle'
     logdate = DateFormat.DEFAULT
     update_index = True
     verbosity = 0
@@ -266,7 +273,9 @@ def display_untracked(context) -> bool:
 
 def editor(context) -> str:
     """Return the configured editor"""
-    app = context.cfg.get(EDITOR, default=fallback_editor())
+    app = _config_with_override(
+        context, OVERRIDE_EDITOR, EDITOR, default=fallback_editor()
+    )
     return _remap_editor(app)
 
 
@@ -302,6 +311,16 @@ def fallback_editor() -> str:
     return Defaults.editor
 
 
+def _config_with_override(
+    context, override_key: str, fallback_key: str, default=''
+) -> str:
+    """Return a cola.* override when configured, else fall back to the git key."""
+    value = context.cfg.get(override_key, default=None)
+    if value:
+        return value
+    return context.cfg.get(fallback_key, default=default)
+
+
 def _remap_editor(app: str) -> str:
     """Remap a configured editor into a visual editor name"""
     # We do this for vim users because this configuration is convenient for new users.
@@ -328,7 +347,7 @@ def enable_gravatar(context) -> bool:
 
 def default_history_browser() -> str:
     """Return the default history browser (e.g. git-dag, gitk)"""
-    if utils.is_win32():
+    if core.IS_WIN32:
         # On Windows, a sensible default is "python git-cola dag"
         # which is different than `gitk` below, but is preferred
         # because we don't have to guess paths.
@@ -345,7 +364,32 @@ def default_history_browser() -> str:
 def history_browser(context) -> str:
     """Return the configured history browser"""
     default = default_history_browser()
-    return context.cfg.get(HISTORY_BROWSER, default=default)
+    return _config_with_override(
+        context,
+        OVERRIDE_HISTORY_BROWSER,
+        HISTORY_BROWSER,
+        default=default,
+    )
+
+
+def difftool(context) -> str:
+    """Return the configured diff tool"""
+    return _config_with_override(
+        context,
+        OVERRIDE_DIFFTOOL,
+        DIFFTOOL,
+        default=Defaults.difftool,
+    )
+
+
+def mergetool(context) -> str:
+    """Return the configured merge tool"""
+    return _config_with_override(
+        context,
+        OVERRIDE_MERGETOOL,
+        MERGETOOL,
+        default=Defaults.mergetool,
+    )
 
 
 def http_proxy(context) -> str:
@@ -417,6 +461,17 @@ def sort_bookmarks(context) -> bool:
     return context.cfg.get(SORT_BOOKMARKS, default=Defaults.sort_bookmarks)
 
 
+def text_elide_mode(context) -> Qt.TextElideMode:
+    """Return the configured text elision mode for UI widgets."""
+    value = context.cfg.get(TEXT_ELIDE_MODE, default=Defaults.text_elide_mode)
+    return {
+        'left': Qt.ElideLeft,
+        'middle': Qt.ElideMiddle,
+        'right': Qt.ElideRight,
+        'none': Qt.ElideNone,
+    }.get(value, Qt.ElideMiddle)
+
+
 def tabwidth(context) -> int:
     """Return the configured tab width in the commit message editor"""
     return context.cfg.get(TABWIDTH, default=Defaults.tabwidth)
@@ -480,24 +535,34 @@ class SetConfig(Command):
     UNDOABLE = True
 
     def __init__(
-        self, model: PreferencesModel, source: str, config: str, value: str
+        self,
+        context,
+        prefs_model: PreferencesModel,
+        source: str,
+        config: str,
+        value: str,
     ) -> None:
+        super().__init__(context)
         self.source = source
         self.config = config
         self.value = value
         self.old_value = None
-        self.model = model
+        self.prefs_model = prefs_model
+
+    @staticmethod
+    def name():
+        return N_('Set Git Config Value')
 
     def do(self) -> None:
         """Modify the model and store the updated configuration"""
         self.old_value = self.model.get_config(self.source, self.config)
-        self.model.set_config(self.source, self.config, self.value)
+        self.prefs_model.set_config(self.source, self.config, self.value)
 
     def undo(self) -> None:
         """Restore the configuration change to its original value"""
         if self.old_value is None:
             return
-        self.model.set_config(self.source, self.config, self.old_value)
+        self.prefs_model.set_config(self.source, self.config, self.old_value)
 
 
 class RemoveDictionary(Command):
@@ -506,8 +571,12 @@ class RemoveDictionary(Command):
     UNDOABLE = True
 
     def __init__(self, context, values: list[str]) -> None:
-        self.context = context
+        super().__init__(context)
         self.values = values
+
+    @staticmethod
+    def name():
+        return N_('Remove Spelling Dictionary')
 
     def do(self) -> None:
         """Remove spelling dictionary entries"""
@@ -535,8 +604,12 @@ class AddDictionary(Command):
     UNDOABLE = True
 
     def __init__(self, context, values: list[str]) -> None:
-        self.context = context
+        super().__init__(context)
         self.values = values
+
+    @staticmethod
+    def name():
+        return N_('Add Spelling Dictionary')
 
     def do(self) -> None:
         """Add spelling dictionary entries"""

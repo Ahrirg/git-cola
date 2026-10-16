@@ -14,7 +14,6 @@ from . import core
 from . import icons
 from . import qtutils
 from . import resources
-from . import utils
 from .i18n import N_
 from .widgets import defs
 
@@ -129,7 +128,7 @@ class Theme:
         else:
             font_weight = ''
 
-        return """
+        return f"""
             /* regular widgets */
             * {{
                 {font_weight}
@@ -180,7 +179,7 @@ class Theme:
 
             /* buttons */
             QPushButton[flat="false"] {{
-                background-color: {button};
+                background-color: {color_rgb};
                 color: {button_text};
                 border-radius: 2px;
                 border-width: 0;
@@ -223,10 +222,10 @@ class Theme:
                 background: transparent;
             }}
             QMenuBar::item:selected {{
-                background: {button};
+                background: {color_rgb};
             }}
             QMenuBar::item:pressed {{
-                background: {button};
+                background: {color_rgb};
             }}
             QMenu {{
                 background-color: {field};
@@ -257,10 +256,10 @@ class Theme:
                 width: 0;
             }}
             QComboBox::drop-down:hover {{
-                border-color: {button} {field} {field} {field};
+                border-color: {color_rgb} {field} {field} {field};
             }}
             QComboBox:item {{
-                background-color: {button};
+                background-color: {color_rgb};
                 color: {button_text};
                 border-width: 0;
                 height: 22px;
@@ -276,8 +275,8 @@ class Theme:
 
             /* MainWindow separator */
             QMainWindow::separator {{
-                width: {separator}px;
-                height: {separator}px;
+                width: {defs.separator}px;
+                height: {defs.separator}px;
             }}
             QMainWindow::separator:hover {{
                 background: {focus};
@@ -292,7 +291,7 @@ class Theme:
                  background: {lighter}
             }}
             QScrollBar::handle:hover {{
-                 background: {button}
+                 background: {color_rgb}
             }}
             QScrollBar:horizontal {{
                 margin: 0 11px 0 11px;
@@ -310,7 +309,7 @@ class Theme:
                 subcontrol-position: left;
             }}
             QScrollBar::add-line:hover, QScrollBar::sub-line:hover {{
-                background: {button};
+                background: {color_rgb};
             }}
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
                 width: 10px;
@@ -345,20 +344,20 @@ class Theme:
                 border-width: 4px 3px 0 3px;
             }}
             QScrollBar:right-arrow:hover {{
-                border-color: {button} {button}
-                              {button} {darker};
+                border-color: {color_rgb} {color_rgb}
+                              {color_rgb} {darker};
             }}
             QScrollBar:left-arrow:hover {{
-                border-color: {button} {darker}
-                              {button} {button};
+                border-color: {color_rgb} {darker}
+                              {color_rgb} {color_rgb};
             }}
             QScrollBar:up-arrow:hover {{
-                border-color: {button} {button}
-                              {darker} {button};
+                border-color: {color_rgb} {color_rgb}
+                              {darker} {color_rgb};
             }}
             QScrollBar:down-arrow:hover {{
-                border-color: {darker} {button}
-                              {button} {button};
+                border-color: {darker} {color_rgb}
+                              {color_rgb} {color_rgb};
             }}
 
             /* tab bar (stacked & docked widgets) */
@@ -389,7 +388,7 @@ class Theme:
                 width: 13px;
             }}
             QCheckBox::indicator:unchecked:hover {{
-                background-color: {button};
+                background-color: {color_rgb};
             }}
             QCheckBox::indicator:unchecked:pressed {{
                 background-color: {darker};
@@ -398,7 +397,7 @@ class Theme:
                 background-color: {darker};
             }}
             QCheckBox::indicator:checked:hover {{
-                background-color: {button};
+                background-color: {color_rgb};
             }}
             QCheckBox::indicator:checked:pressed {{
                 background-color: {field};
@@ -420,7 +419,7 @@ class Theme:
                 border: 1px solid {darker};
             }}
             QProgressBar::chunk {{
-                background-color: {button};
+                background-color: {color_rgb};
                 width: 1px;
             }}
 
@@ -438,7 +437,7 @@ class Theme:
                 border-width: 0 3px 4px 3px;
             }}
             QAbstractSpinBox::up-arrow:hover {{
-                border-color: {field} {field} {button} {field};
+                border-color: {field} {field} {color_rgb} {field};
                 border-width: 0 3px 4px 3px;
             }}
             QAbstractSpinBox::down-arrow {{
@@ -446,7 +445,7 @@ class Theme:
                 border-width: 4px 3px 0 3px;
             }}
             QAbstractSpinBox::down-arrow:hover {{
-                border-color: {button} {field} {field} {field};
+                border-color: {color_rgb} {field} {field} {field};
                 border-width: 4px 3px 0 3px;
             }}
 
@@ -485,19 +484,7 @@ class Theme:
                 padding-left: 4px;
             }}
 
-            """.format(
-            background=background,
-            field=field,
-            font_weight=font_weight,
-            button=color_rgb,
-            darker=darker,
-            lighter=lighter,
-            grayed=grayed,
-            button_text=button_text,
-            field_text=field_text,
-            separator=defs.separator,
-            focus=focus,
-        )
+            """
 
     def style_sheet_custom(self, app_palette: QPalette, bold_fonts: Any):
         """Get custom style sheet.
@@ -599,7 +586,7 @@ def style_sheet_default(palette: QPalette, bold_fonts: bool) -> str:
     # (smaller) metrics, which pushes the indicator out of vertical alignment
     # with its label. Keep the native controls there and only restyle the
     # indicators on platforms where the palette-based default looks out of place.
-    if utils.is_darwin():
+    if core.IS_DARWIN:
         checkbox_style = ''
     else:
         checkbox_style = """
@@ -684,7 +671,7 @@ def get_all_themes() -> list[Theme]:
         ),
     ]
 
-    if utils.is_darwin():
+    if core.IS_DARWIN:
         themes.extend(get_macos_themes().values())
 
     themes.extend([
@@ -748,7 +735,7 @@ def get_all_themes() -> list[Theme]:
 
     # check if themes path exists in user folder
     path = resources.config_home('themes')
-    if not os.path.isdir(path):
+    if not core.isdir(path):
         return themes
 
     # Gather Qt .qss stylesheet themes
@@ -769,7 +756,7 @@ def apply_platform_theme(theme: Theme) -> None:
     """Apply platform-specific themes (e.g. dark mode on macOS)"""
     # https://developer.apple.com/documentation/appkit/nsappearancecustomization/choosing_a_specific_appearance_for_your_macos_app
     # https://github.com/git-cola/git-cola/issues/905#issuecomment-461118465
-    if utils.is_darwin():
+    if core.IS_DARWIN:
         if AppKit is None:
             return
         app = AppKit.NSApplication.sharedApplication()

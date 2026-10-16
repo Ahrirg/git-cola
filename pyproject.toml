@@ -20,6 +20,7 @@ description = "Git Cola is a powerful Git GUI with a slick and intuitive user in
 dependencies = [
     "polib >= 1.0.0",
     "qtpy >= 1.1.0",
+
 ]
 dynamic = ["version"]
 readme = {file = "README.md", content-type = "text/markdown"}
@@ -30,6 +31,7 @@ testing = [
     "pytest-checkdocs >= 2.4",
     "pytest-enabler >= 2.2",
     "pytest-ruff >= 0.2.1",
+    "ruff < 0.16",
 ]
 docs = [
     "furo",
@@ -44,6 +46,10 @@ extras = [
     "pyobjc; sys_platform == 'darwin'",
     # Enables the "Send to Trash" feature.
     "send2trash",
+    # Enables server/client functionality.
+    "websockets == 15.0.1",
+    "msgpack >= 1.1.2",
+    "paramiko >= 5.0.0"
 ]
 # Developer tools.
 dev = [

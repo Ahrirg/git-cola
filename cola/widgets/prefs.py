@@ -7,7 +7,6 @@ from .. import icons
 from .. import qtutils
 from .. import spellcheck
 from .. import themes
-from ..compat import ustr
 from ..i18n import N_
 from ..models import prefs
 from ..models.prefs import Defaults
@@ -74,27 +73,35 @@ class FormWidget(QtWidgets.QWidget):
 
     def _int_config_changed(self, config):
         def runner(value):
-            cmds.do(prefs.SetConfig, self.model, self.source, config, value)
+            cmds.do(
+                prefs.SetConfig, self.context, self.model, self.source, config, value
+            )
 
         return runner
 
     def _bool_config_changed(self, config):
         def runner(value):
-            cmds.do(prefs.SetConfig, self.model, self.source, config, value)
+            cmds.do(
+                prefs.SetConfig, self.context, self.model, self.source, config, value
+            )
 
         return runner
 
     def _text_config_changed(self, config, widget):
         def runner():
             value = widget.text()
-            cmds.do(prefs.SetConfig, self.model, self.source, config, value)
+            cmds.do(
+                prefs.SetConfig, self.context, self.model, self.source, config, value
+            )
 
         return runner
 
     def _item_config_changed(self, config, widget):
         def runner():
             value = widget.value()
-            cmds.do(prefs.SetConfig, self.model, self.source, config, value)
+            cmds.do(
+                prefs.SetConfig, self.context, self.model, self.source, config, value
+            )
 
         return runner
 
@@ -136,7 +143,9 @@ class RepoFormWidget(FormWidget):
             'Absolute path are used as-is.'
         )
         patches_directory = prefs.patches_directory(context)
-        self.patches_directory = standard.DirectoryPathLineEdit(patches_directory, self)
+        self.patches_directory = standard.DirectoryPathLineEdit(
+            context, patches_directory, self
+        )
         self.patches_directory.setToolTip(tooltip)
 
         tooltip = N_(
@@ -301,6 +310,11 @@ class SettingsFormWidget(FormWidget):
         self.tabwidth = standard.SpinBox(maxi=42)
         self.textwidth = standard.SpinBox(maxi=150)
 
+        self.override_editor = QtWidgets.QLineEdit()
+        self.override_editor.setToolTip(
+            N_('Override the GUI editor setting when configured')
+        )
+
         self.editor = QtWidgets.QLineEdit()
         self.editor.setToolTip(N_('The main GUI editor that must block until it exits'))
 
@@ -310,8 +324,21 @@ class SettingsFormWidget(FormWidget):
         )
         self.historybrowser = QtWidgets.QLineEdit()
         self.blameviewer = QtWidgets.QLineEdit()
+        self.override_historybrowser = QtWidgets.QLineEdit()
+        self.override_historybrowser.setToolTip(
+            N_('Override the history browser setting when configured')
+        )
+
         self.difftool = QtWidgets.QLineEdit()
+        self.override_difftool = QtWidgets.QLineEdit()
+        self.override_difftool.setToolTip(
+            N_('Override the diff tool setting when configured')
+        )
         self.mergetool = QtWidgets.QLineEdit()
+        self.override_mergetool = QtWidgets.QLineEdit()
+        self.override_mergetool.setToolTip(
+            N_('Override the merge tool setting when configured')
+        )
 
         self.linebreak = qtutils.checkbox()
         self.mouse_zoom = qtutils.checkbox()
@@ -351,10 +378,18 @@ class SettingsFormWidget(FormWidget):
         self.add_row('', QtWidgets.QLabel())
         self.add_row(N_('Editor'), self.editor)
         self.add_row(N_('Background Editor'), self.background_editor)
+        self.add_row(N_('Editor Override'), self.override_editor)
+        self.add_row('', QtWidgets.QLabel())
         self.add_row(N_('History Browser'), self.historybrowser)
-        self.add_row(N_('Blame Viewer'), self.blameviewer)
+        self.add_row(N_('History Browser Override'), self.override_historybrowser)
+        self.add_row('', QtWidgets.QLabel())
         self.add_row(N_('Diff Tool'), self.difftool)
+        self.add_row(N_('Diff Tool Override'), self.override_difftool)
+        self.add_row('', QtWidgets.QLabel())
         self.add_row(N_('Merge Tool'), self.mergetool)
+        self.add_row(N_('Merge Tool Override'), self.override_mergetool)
+        self.add_row('', QtWidgets.QLabel())
+        self.add_row(N_('Blame Viewer'), self.blameviewer)
         self.add_row(N_('Recent Repository Count'), self.maxrecent)
         self.add_row(
             N_('Load Previous Commit Message Count'), self.load_commitmsg_count
@@ -387,6 +422,13 @@ class SettingsFormWidget(FormWidget):
 
         self.set_config({
             prefs.ASPELL_ENABLED: (self.aspell_enabled, Defaults.aspell_enabled),
+            prefs.OVERRIDE_EDITOR: (self.override_editor, ''),
+            prefs.OVERRIDE_HISTORY_BROWSER: (
+                self.override_historybrowser,
+                '',
+            ),
+            prefs.OVERRIDE_DIFFTOOL: (self.override_difftool, ''),
+            prefs.OVERRIDE_MERGETOOL: (self.override_mergetool, ''),
             prefs.SAVEWINDOWSETTINGS: (
                 self.save_window_settings,
                 Defaults.save_window_settings,
@@ -458,20 +500,39 @@ class AppearanceFormWidget(FormWidget):
         self.theme = qtutils.combo_mapped(themes.options(themes=self.themes))
         self.icon_theme = qtutils.combo_mapped(icons.icon_themes())
 
-        # The transform to ustr is needed because the config reader will convert
+        # The transform to str is needed because the config reader will convert
         # "0", "1", and "2" into integers.  The "1.5" value, though, is
         # parsed as a string, so the transform is effectively a no-op.
-        self.high_dpi = qtutils.combo_mapped(hidpi.options(), transform=ustr)
+        self.high_dpi = qtutils.combo_mapped(hidpi.options(), transform=str)
         self.high_dpi.setEnabled(hidpi.is_supported())
         self.bold_fonts = qtutils.checkbox()
         self.bold_headers = qtutils.checkbox()
         self.status_show_totals = qtutils.checkbox()
         self.status_indent = qtutils.checkbox()
         self.block_cursor = qtutils.checkbox(checked=True)
+        self.text_elide_mode = qtutils.combo_mapped([
+            (N_('Left'), 'left'),
+            (N_('Middle'), 'middle'),
+            (N_('Right'), 'right'),
+            (N_('None'), 'none'),
+        ])
+        self.text_elide_mode.setToolTip(
+            N_('Choose how overly long text is truncated in the UI.')
+        )
 
+        tooltip = N_(
+            'Choose whether appearance settings apply to all repositories\n'
+            'or only to the current repository'
+        )
+        self.scope = qtutils.combo(
+            [N_('All Repositories'), N_('Current Repository')], tooltip=tooltip
+        )
+
+        self.add_row(N_('Apply Settings To'), self.scope)
         self.add_row(N_('Fixed-Width Font'), self.fixed_font)
         self.add_row(N_('Font Size'), self.fixed_font_size)
         self.add_row(N_('Font Size (UI)'), self.font_size)
+        self.add_row(N_('Text Elide Mode'), self.text_elide_mode)
         self.add_row(N_('GUI theme'), self.theme)
         self.add_row(N_('Icon theme'), self.icon_theme)
         self.add_row(N_('High DPI'), self.high_dpi)
@@ -480,7 +541,6 @@ class AppearanceFormWidget(FormWidget):
         self.add_row(N_('Show File Counts in Status Titles'), self.status_show_totals)
         self.add_row(N_('Indent Status paths'), self.status_indent)
         self.add_row(N_('Use a Block Cursor in Diff Editors'), self.block_cursor)
-
         self.set_config({
             prefs.BOLD_FONTS: (self.bold_fonts, Defaults.bold_fonts),
             prefs.BOLD_HEADERS: (self.bold_headers, Defaults.bold_headers),
@@ -497,12 +557,22 @@ class AppearanceFormWidget(FormWidget):
             prefs.THEME: (self.theme, Defaults.theme),
             prefs.ICON_THEME: (self.icon_theme, Defaults.icon_theme),
             prefs.BLOCK_CURSOR: (self.block_cursor, Defaults.block_cursor),
+            prefs.TEXT_ELIDE_MODE: (
+                self.text_elide_mode,
+                Defaults.text_elide_mode,
+            ),
         })
 
         self.fixed_font.currentFontChanged.connect(self.current_font_changed)
         self.fixed_font_size.valueChanged.connect(self.diff_font_size_changed)
         self.font_size.valueChanged.connect(self.font_size_changed)
         self.theme.currentIndexChanged.connect(self._theme_changed)
+        self.scope.currentIndexChanged.connect(self._scope_changed)
+
+    def _scope_changed(self, idx):
+        """Switch between editing global and repository-local appearance settings"""
+        self.source = 'local' if idx == 1 else 'global'
+        self.update_from_config()
 
     def _theme_changed(self, theme_idx):
         """Set the icon theme to dark/light when the main theme changes"""
@@ -518,9 +588,8 @@ class AppearanceFormWidget(FormWidget):
         elif theme.is_dark:
             if icon_theme in ('default', 'light'):
                 self.icon_theme.set_value('dark')
-        elif not theme.is_dark:
-            if icon_theme in ('default', 'dark'):
-                self.icon_theme.set_value('light')
+        elif not theme.is_dark and icon_theme in ('default', 'dark'):
+            self.icon_theme.set_value('light')
 
     def update_from_config(self):
         """Update widgets to the current config values"""
@@ -537,16 +606,34 @@ class AppearanceFormWidget(FormWidget):
 
     def diff_font_size_changed(self, size):
         """The diff font size was changed"""
+        # The diff font is read back via qtutils.diff_font(), which always reads
+        # the merged config, so it is intentionally kept global-only here.
         font = self.fixed_font.currentFont()
         font.setPointSize(size)
-        cmds.do(prefs.SetConfig, self.model, 'global', prefs.FONTDIFF, font.toString())
+        cmds.do(
+            prefs.SetConfig,
+            self.context,
+            self.model,
+            'global',
+            prefs.FONTDIFF,
+            font.toString(),
+        )
 
     def font_size_changed(self, size):
         """The UI font size was changed"""
-        cmds.do(prefs.SetConfig, self.model, 'global', prefs.FONTSIZE, size)
+        cmds.do(
+            prefs.SetConfig, self.context, self.model, self.source, prefs.FONTSIZE, size
+        )
 
     def current_font_changed(self, font):
-        cmds.do(prefs.SetConfig, self.model, 'global', prefs.FONTDIFF, font.toString())
+        cmds.do(
+            prefs.SetConfig,
+            self.context,
+            self.model,
+            'global',
+            prefs.FONTDIFF,
+            font.toString(),
+        )
 
 
 class AppearanceWidget(QtWidgets.QWidget):

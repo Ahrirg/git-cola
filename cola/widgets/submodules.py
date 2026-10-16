@@ -5,7 +5,6 @@ from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
 
 from .. import cmds
-from .. import compat
 from .. import core
 from .. import icons
 from .. import qtutils
@@ -98,7 +97,7 @@ class AddSubmodule(standard.Dialog):
         )
 
         self.depth_spinbox = standard.SpinBox(
-            mini=0, maxi=compat.maxint, value=0, parent=self
+            mini=0, maxi=core.INT32_MAX, value=0, parent=self
         )
         self.depth_spinbox.setToolTip(
             N_(
@@ -196,7 +195,7 @@ class SubmodulesTreeWidget(standard.TreeWidget):
         return super().showEvent(event)
 
     def tree_double_clicked(self, item, _column):
-        path = core.abspath(item.path)
+        path = self.context.ops.abspath(item.path)
         cmds.do(cmds.OpenRepo, self.context, path)
 
 

@@ -4,9 +4,10 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from typing import Callable
+    from collections.abc import Callable
 
 from . import core
+from . import operations
 from .i18n import N_
 
 if TYPE_CHECKING:
@@ -88,10 +89,11 @@ class Interaction:
         )
         sys.stdout.write(
             """
-%(title)s
-%(title_dashes)s
-%(message)s%(informative_text)s%(details)s\n"""
-            % scope
+{title}
+{title_dashes}
+{message}{informative_text}{details}\n""".format(
+                **scope
+            )
         )
         sys.stdout.flush()
 
@@ -126,9 +128,9 @@ class Interaction:
             details_display_fn=details_display_fn,
         )
         if default:
-            prompt = '%s? [Y/n] ' % ok_text
+            prompt = f'{ok_text}? [Y/n] '
         else:
-            prompt = '%s? [y/N] ' % ok_text
+            prompt = f'{ok_text}? [y/N] '
         sys.stdout.write(prompt)
         sys.stdout.flush()
         answer: str = sys.stdin.readline().strip()
@@ -144,11 +146,11 @@ class Interaction:
 
     @classmethod
     def run_command(
-        cls, title: str, cmd: list[str]
+        cls, ops: operations.IOperations, title: str, cmd: list[str]
     ) -> tuple[int, core.UStr, core.UStr]:
         cls.log('# ' + title)
         cls.log('$ ' + core.list2cmdline(cmd))
-        status, out, err = core.run_command(cmd)
+        status, out, err = ops.run_command(cmd)
         cls.log_status(status, out, err)
         return status, out, err
 
@@ -168,11 +170,11 @@ class Interaction:
         """Emit status, out, and err into the log"""
         msg = ''
         if out:
-            msg += out + '\n'
+            msg += f'{out}\n'
         if err:
-            msg += err + '\n'
+            msg += f'{err}\n'
         cls.log(msg)
-        cls.log('exit status %s' % status)
+        cls.log(f'exit status {status}')
 
     @classmethod
     def log(cls, message: str) -> None:
@@ -181,7 +183,7 @@ class Interaction:
 
     @classmethod
     def save_as(cls, filename: str, title: str) -> str | None:
-        if cls.confirm(title, 'Save as %s?' % filename, '', ok_text='Save'):
+        if cls.confirm(title, f'Save as {filename}?', '', ok_text='Save'):
             return filename
         return None
 

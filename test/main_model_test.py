@@ -5,6 +5,7 @@ import pytest
 
 from cola import core
 from cola import git
+from cola import operations_local
 from cola.models import main
 from cola.models.main import FETCH
 from cola.models.main import FETCH_HEAD
@@ -26,7 +27,7 @@ REMOTE_BRANCH = 'remote'
 def mock_context():
     """Return a Mock context for testing"""
     context = Mock()
-    context.git = git.create()
+    context.git = git.create(operations_local.LocalOperations())
     return context
 
 
@@ -122,7 +123,7 @@ def test_remote_args_fetch(mock_context):
 def test_remote_args_fetch_head(mock_context):
     """Fetch handles the implicit FETCH_HEAD ref"""
     # When FETCH_HEAD is used then we should not specify a tracking branch target.
-    (args, kwargs) = main.remote_args(
+    (args, _kwargs) = main.remote_args(
         mock_context,
         REMOTE,
         FETCH,
@@ -149,7 +150,7 @@ def test_remote_args_fetch_tags(mock_context):
 
 
 def test_remote_args_fetch_into_tracking_branch(mock_context):
-    (args, kwargs) = main.remote_args(
+    (args, _kwargs) = main.remote_args(
         mock_context,
         REMOTE,
         FETCH,

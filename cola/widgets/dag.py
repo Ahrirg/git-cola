@@ -3,6 +3,7 @@ import collections
 import enum
 import itertools
 import math
+import sys
 from functools import partial
 
 from qtpy import QtCore
@@ -21,7 +22,6 @@ from .. import icons
 from .. import qtcompat
 from .. import qtutils
 from .. import utils
-from ..compat import maxsize
 from ..i18n import N_
 from ..models import dag
 from ..models import main
@@ -1062,8 +1062,7 @@ class GraphDelegate(QtWidgets.QStyledItemDelegate):
             text_width = 0
 
         total_width = graph_width + 8 + labels_width + 8 + text_width
-        if total_width < self.LANE_WIDTH * 4:
-            total_width = self.LANE_WIDTH * 4
+        total_width = max(total_width, self.LANE_WIDTH * 4)
         height = option.fontMetrics.height()
         return QtCore.QSize(total_width, height)
 
@@ -1148,6 +1147,11 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         ViewerMixin.__init__(self)
 
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        # Every row is a single line of text in the same font, so all rows are
+        # the same height. Telling Qt this lets it size the view from one row
+        # instead of calling the delegate's sizeHint() for every commit, which
+        # is a large saving on big histories.
+        self.setUniformRowHeights(True)
         self.setHeaderLabels([N_('Summary'), N_('Author'), N_('Date, Time')])
         self.header().setSectionResizeMode(
             CommitTreeWidgetItem.DATE, QtWidgets.QHeaderView.Stretch
@@ -2302,11 +2306,22 @@ class Label(QtWidgets.QGraphicsItem):
         QtWidgets.QGraphicsItem.__init__(self)
         self.setZValue(-1)
         self.commit = commit
+        # Cached bounding rect and the font it was computed for. The rect only
+        # depends on the (immutable) tags and the label font, so it is computed
+        # once and reused -- Qt queries boundingRect() often (indexing, hit
+        # testing, paint culling) and the per-tag QPainterPath work below is
+        # expensive to repeat.
+        self._bounding_rect = None
+        self._bounding_rect_font = None
 
     def type(self):
         return self.item_type
 
     def boundingRect(self, cache=Cache):
+        font = cache.label_font()
+        if self._bounding_rect is not None and self._bounding_rect_font is font:
+            return self._bounding_rect
+
         QPainterPath = QtGui.QPainterPath
         QRectF = QtCore.QRectF
 
@@ -2317,7 +2332,6 @@ class Label(QtWidgets.QGraphicsItem):
         border_x = self.border + self.text_x_offset
         border_y = self.border + self.text_y_offset
 
-        font = cache.label_font()
         item_shape = QPainterPath()
 
         base_rect = QRectF(0, 0, width, height)
@@ -2332,7 +2346,9 @@ class Label(QtWidgets.QGraphicsItem):
             item_shape.addRect(box_rect)
             current_width = item_shape.boundingRect().width() + spacing
 
-        return item_shape.boundingRect()
+        self._bounding_rect = item_shape.boundingRect()
+        self._bounding_rect_font = font
+        return self._bounding_rect
 
     def paint(self, painter, _option, _widget, cache=Cache):
         # Draw tags and branches
@@ -2643,8 +2659,8 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         if not items:
             rect = self.scene().itemsBoundingRect()
         else:
-            x_min = y_min = maxsize
-            x_max = y_max = -maxsize
+            x_min = y_min = sys.maxsize
+            x_max = y_max = -sys.maxsize
 
             for item in items:
                 pos = item.pos()
@@ -2973,13 +2989,11 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
             # directions simultaneously.
             for col in itertools.count(0):
                 if col not in columns:
-                    if col > self.max_column:
-                        self.max_column = col
+                    self.max_column = max(self.max_column, col)
                     break
                 col = -col
                 if col not in columns:
-                    if col < self.min_column:
-                        self.min_column = col
+                    self.min_column = min(self.min_column, col)
                     break
         self.declare_column(col)
         columns[col] = 1
@@ -2997,8 +3011,7 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
                 can_overlap = list(range(column - 1, self.min_column - 1, -1))
             for value in can_overlap:
                 frontier = self.frontier[value]
-                if frontier > cell_row:
-                    cell_row = frontier
+                cell_row = max(cell_row, frontier)
 
         # Avoid overlapping with tags of commits at cell_row.
         if self.x_off > 0:

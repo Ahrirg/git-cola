@@ -9,7 +9,6 @@ from qtpy.QtCore import Signal
 
 from .. import actions
 from .. import cmds
-from .. import core
 from .. import display
 from .. import gitcmds
 from .. import hotkeys
@@ -79,6 +78,9 @@ class CommitMessageEditor(QtWidgets.QFrame):
 
         self.launch_editor = actions.launch_editor_at_line(context, self)
         self.launch_difftool = actions.launch_difftool(context, self)
+        if context.ops.is_remote():
+            self.launch_editor.setEnabled(False)
+            self.launch_difftool.setEnabled(False)
 
         self.move_up = actions.move_up(self)
         self.move_down = actions.move_down(self)
@@ -109,7 +111,16 @@ class CommitMessageEditor(QtWidgets.QFrame):
         )
         self.description.menu_actions.extend(menu_actions)
 
-        commit_button_tooltip = N_('Commit staged changes\nShortcut: Ctrl+Enter')
+        # Render the shortcut from the action so it matches the platform --
+        # Qt maps Ctrl to Command on macOS -- instead of hardcoding "Ctrl+Enter".
+        commit_shortcut = self.commit_action.shortcut().toString(
+            QtGui.QKeySequence.NativeText
+        )
+        commit_button_tooltip = N_('Commit staged changes')
+        if commit_shortcut:
+            commit_button_tooltip = '{}\n{}'.format(
+                commit_button_tooltip, N_('Shortcut: %s') % commit_shortcut
+            )
         self.commit_button = qtutils.create_button(
             text=N_('Commit@@verb'), tooltip=commit_button_tooltip, icon=icons.commit()
         )
@@ -291,7 +302,7 @@ class CommitMessageEditor(QtWidgets.QFrame):
         commit_msg = ''
         commit_msg_path = commit_message_path(context)
         if commit_msg_path:
-            commit_msg = core.read(commit_msg_path)
+            commit_msg = context.ops.file_read(commit_msg_path)
         model.set_commitmsg(commit_msg)
 
         # Allow tab to jump from the summary to the description
@@ -633,11 +644,18 @@ class CommitMessageEditor(QtWidgets.QFrame):
     def _commit_finished(self, task):
         """Reset widget state on completion of the commit task"""
         title = N_('Commit failed')
-        status, out, err = task.result
-        Interaction.command(title, 'git commit', status, out, err)
+        result = task.result
+        if isinstance(result, tuple) and len(result) == 3:
+            status, out, err = result
+            ok = status == 0
+            Interaction.command(title, 'git commit', status, out, err)
+        elif isinstance(result, bool):
+            ok = result
+        else:
+            ok = False
         # Author and date settings are not cleared unless the commit operation succeeds.
         # These settings are consumed when a commit is produced with their values.
-        if status == 0:
+        if ok:
             self.bypass_commit_hooks_action.setChecked(False)
             self.set_commit_author(False, update=False)
             self.set_commit_date(False, update=True)

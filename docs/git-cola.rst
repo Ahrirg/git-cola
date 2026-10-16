@@ -92,6 +92,13 @@ config
 Configure settings. ``git cola config`` is an entry point for the
 ``File > Preferences`` main menu action.
 
+connect
+-------
+
+Connect to a cola server over the network. Once connected, the
+Git Cola user interface acts as a frontend to controls the
+cola server running on the remote machine.
+
 dag
 ---
 
@@ -156,6 +163,13 @@ search
 
 Search for commits. ``git cola search`` is an entry point for the
 ``Actions > Search...`` main menu action.
+
+server
+------
+
+Start a server that will listen for connections from ``git cola connect``
+clients. The cola server allows you to connect your local Git Cola UI
+to a cola server running on a separate machine.
 
 stash
 -----
@@ -451,6 +465,13 @@ and if modified by any tool and not conflicting with manual changes the commit
 message will be updated on the next refresh.
 This feature is useful as it allows scripts or agents to prepare a message for manual
 review.
+
+The commit message belongs to a single worktree. Linked worktrees created by
+`git worktree add` use `.git/worktrees/<name>/GIT_COLA_MSG` inside the main
+repository instead of `.git/GIT_COLA_MSG`. Scripts should ask Git for the path
+rather than assuming it::
+
+    git rev-parse --git-path GIT_COLA_MSG
 
 Sign Off
 --------
@@ -949,6 +970,19 @@ to install the Spanish dictionary, run:
 
    sudo apt install hunspell-es
 
+cola.difftool
+-------------
+
+Override the default diff tool to use. This can be used to override the ``diff.tool``
+configuration without affecting core Git's `difftool` configuration setting.
+
+cola.editor
+-----------
+
+Override the editor used by Git Cola without affecting core Git's
+``core.editor`` or ``gui.editor`` configuration.
+
+
 cola.enablepopups
 -----------------
 
@@ -1101,6 +1135,12 @@ cola.maxrecent
 the start and recent repositories menu.  The maximum number of repositories to
 remember is controlled by `cola.maxrecent` and defaults to `8`.
 
+cola.mergetool
+--------------
+
+Override the default merge tool to use. This can be used to override the ``merge.tool``
+configuration without affecting core Git's `mergetool` configuration setting.
+
 cola.mousezoom
 --------------
 
@@ -1247,6 +1287,12 @@ The table below shows the builtin configuration.
     xfce4-terminal      "xfce4-terminal -e"     true
     xterm               "xterm -e"              false
 
+cola.textedlidemode
+-------------------
+
+How to truncate overly-long text, for example in the startup dialog.
+Valid values are `left`, `middle`, `right`, and `none`.
+Defaults to `middle`.
 
 cola.textwidth
 --------------
@@ -1325,6 +1371,13 @@ The default diff header text color, in hexadecimal #RRGGBB notation.
 Defaults to "#bbbbbb"::
 
     git config cola.color.header '#bbbbbb'
+
+cola.historybrowser
+-------------------
+
+Override the history browser to use when visualizing history.
+This should be used if you do not want to affect core Git's
+``gui.historybrowser`` configuration.
 
 cola.updateindex
 ----------------
@@ -1455,6 +1508,25 @@ environment variables.
 
 ENVIRONMENT VARIABLES
 =====================
+
+GIT_COLA
+--------
+
+Git Cola sets the ``GIT_COLA`` variable in its environment with a path to the
+``git-cola`` command. This environment variable is not read by Git Cola.
+
+Your custom `.git/hooks` can use the presence of this variable in the environment
+to detect when a Git Cola session is executing ``git`` commands.
+
+GIT_DAG
+-------
+
+Similar to the ``GIT_COLA`` environment variable, Git DAG sets the ``GIT_DAG``
+variable in its environment with a path to the ``git-dag`` command.
+
+Note that this variable is **only** set when running Git DAG via the ``git-dag``
+entry point. Launching the DAG viewer from within a Git Cola session will only
+have ``GIT_COLA`` present in the environment.
 
 GIT_ASKPASS
 -----------

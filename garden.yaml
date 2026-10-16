@@ -157,9 +157,9 @@ trees:
       release: ${activate} ./todo/release --all
       run: ${activate} ./bin/git-cola "$@"
       run/qt6: ${activate} QT_API=PyQt6 ./bin/git-cola "$@"
-      test: ${activate} ${offscreen} ${PYTEST} "$@" cola test
-      tox: ${offscreen} tox run "$@"
-      tox/check: ${offscreen} tox run -e check "$@"
+      test: ${activate} ${PYTEST} "$@" cola test
+      tox: tox run "$@"
+      tox/check: tox run -e check "$@"
       version/bump: ./todo/set-version "${version-next}"
       version/commit: git commit --all --signoff --message "git-cola v${version-digits}"
       version/tag: git tag --sign --message "git-cola ${version-builtin}" "v${version-builtin}"
@@ -171,6 +171,7 @@ trees:
       afradox: "${gh-https}/AFRADOX/git-cola.git"
       ahrirg: "${gh-https}/Ahrirg/git-cola.git"
       akhilsayshi: "${gh-https}/akhilsayshi/git-cola.git"
+      andreasvonvogt: "${gh-https}/andreasvonvogt/git-cola.git"
       arnaudh: "${gh-https}/arnaudh/git-cola.git"
       axel-h: "${gh-https}/axel-h/git-cola.git"
       baumicoder: "${gh-https}/BaumiCoder/git-cola.git"
@@ -194,6 +195,7 @@ trees:
       jamie-pate: "${gh-https}/jamie-pate/git-cola.git"
       jm4r: "${gh-https}/jm4R/git-cola.git"
       joshuataylor: "${gh-https}/joshuataylor/git-cola.git"
+      karunyamuddana: "${gh-https}/Karunya-Muddana/git-cola.git"
       kenyuy: "${gh-https}/kenyuy/git-cola.git"
       kisaragi-hiu: "${gh-https}/kisaragi-hiu/git-cola.git"
       kneirinck: "${gh-https}/kneirinck/git-cola.git"
@@ -301,10 +303,15 @@ trees:
     variables:
       app-id: com.github.git_cola.git-cola
     commands:
-      build: flatpak-builder "$@" --user "${prefix}" "${app-id}.yml"
+      build/full: flatpak-builder "$@" --ccache --user "${prefix}" "${app-id}.yml"
+      build: |
+        flatpak-builder --skip-if-unchanged --keep-build-dirs --build-only --ccache \
+            --user "${prefix}" "${app-id}.yml"
       check: |
-        flatpak run --command=flatpak-builder-lint \
-            org.flatpak.Builder "$@" --exceptions builddir "${prefix}"
+        flatpak run --command=flatpak-builder-lint org.flatpak.Builder \
+            --exceptions --exceptions-repo stable manifest "${app-id}.yml" "$@"
+        flatpak run --command=flatpak-builder-lint org.flatpak.Builder \
+            --exceptions --exceptions-repo stable builddir "${prefix}" "$@"
       install: flatpak-builder "$@" --install --user "${prefix}" "${app-id}.yml"
       run: flatpak run ${app-id}
       setup: |
@@ -312,9 +319,10 @@ trees:
         flathub https://flathub.org/repo/flathub.flatpakrepo
         flatpak install --user \
         org.flatpak.Builder/x86_64 \
-        org.kde.Sdk/x86_64/6.9 \
-        org.kde.Platform/x86_64/6.9 \
-        com.riverbankcomputing.PyQt.BaseApp/x86_64/6.9
+        org.freedesktop.Sdk.Extension.rust-stable/x86_64/25.08 \
+        org.kde.Sdk/x86_64/6.11 \
+        org.kde.Platform/x86_64/6.11 \
+        com.riverbankcomputing.PyQt.BaseApp/x86_64/6.11
     url: "${gh-https}/flathub/com.github.git_cola.git-cola.git"
     remotes:
       erick555: "${gh-https}/Erick555/com.github.git_cola.git-cola.git"
@@ -410,7 +418,6 @@ variables:
     then
         source "${env-dir}/bin/activate"
     fi
-  offscreen: "QT_QPA_PLATFORMTHEME=offscreen QT_QPA_PLATFORM=offscreen"
   pip-editable: "--editable"
   pip-upgrade: ""
   version-digits: |

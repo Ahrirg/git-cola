@@ -6,7 +6,6 @@ from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
 from .. import cmds
-from .. import core
 from .. import icons
 from .. import qtutils
 from .. import utils
@@ -177,12 +176,10 @@ class Clone(standard.Dialog):
         if default == '.git':
             # The end of the URL is /.git, so assume it's a file path
             default = os.path.basename(os.path.dirname(newurl))
-        if default.endswith('.git'):
-            # The URL points to a bare repo
-            default = default[:-4]
+        default = default.removesuffix('.git')
         if url == '.':
             # The URL is the current repo
-            default = os.path.basename(core.getcwd())
+            default = os.path.basename(self.context.ops.getcwd())
         if not default:
             Interaction.information(
                 N_('Error Cloning'), N_('Could not parse Git URL: "%s"') % url
@@ -198,13 +195,13 @@ class Clone(standard.Dialog):
         count = 1
         destdir = os.path.join(dirname, default)
         olddestdir = destdir
-        if core.exists(destdir):
+        if self.context.ops.exists(destdir):
             # An existing path can be specified
             msg = N_('"%s" already exists, cola will create a new directory') % destdir
             Interaction.information(N_('Directory Exists'), msg)
 
         # Make sure the directory doesn't exist
-        while core.exists(destdir):
+        while self.context.ops.exists(destdir):
             destdir = olddestdir + str(count)
             count += 1
 

@@ -3,10 +3,9 @@ from __future__ import annotations
 import os
 import sys
 import webbrowser
+from collections.abc import Callable
 from typing import TYPE_CHECKING
-from typing import Callable
 
-from . import compat
 from . import core
 
 if TYPE_CHECKING:
@@ -18,7 +17,9 @@ _default_icon_theme = 'light'
 _resources = core.abspath(core.realpath(__file__))
 _package = os.path.dirname(_resources)
 
-if _package.endswith(os.path.join('site-packages', 'cola')):
+if _package.endswith(os.path.join('site-packages', 'cola')) or _package.endswith(
+    os.path.join('dist-packages', 'cola')
+):
     # Unix release tree
     # __file__ = '$prefix/lib/pythonX.Y/site-packages/cola/__file__.py'
     # _package = '$prefix/lib/pythonX.Y/site-packages/cola'
@@ -53,7 +54,7 @@ def sibling_bindir(*args) -> str:
 
 def command(name: str) -> str:
     """Return a command from the bin/ directory"""
-    if compat.WIN32:
+    if core.IS_WIN32:
         # On Windows we have to support being installed via the pynsist installation
         # layout and the pip-installed layout. We also have check for .exe launchers
         # and prefer them when present.
@@ -91,7 +92,7 @@ def doc(*args) -> str:
     # hotkey files as cola/data/ package data. This is a fallback location for when
     # users did not use the garden.yaml or Makefile to install cola.
     path = share('doc', 'git-cola', *args)
-    if not os.path.exists(path):
+    if not core.exists(path):
         path = prefix('docs', *args)
     return path
 
@@ -158,9 +159,9 @@ def icon_dir(theme: str) -> str:
         icons = package_data('icons')
     else:
         theme_dir = package_data('icons', theme)
-        if os.path.isabs(theme) and os.path.isdir(theme):
+        if os.path.isabs(theme) and core.isdir(theme):
             icons = theme
-        elif os.path.isdir(theme_dir):
+        elif core.isdir(theme_dir):
             icons = theme_dir
         else:
             icons = package_data('icons')
@@ -193,18 +194,18 @@ def xdg_data_dirs() -> list[TextType]:
     """
     paths: list[TextType] = []
     xdg_data_home_dir = xdg_data_home()
-    if os.path.isdir(xdg_data_home_dir):
+    if core.isdir(xdg_data_home_dir):
         paths.append(xdg_data_home_dir)
 
     xdg_data_dirs_env: TextType | None = core.getenv('XDG_DATA_DIRS', '')
     if not xdg_data_dirs_env:
         xdg_data_dirs_env: TextType | None = '/usr/local/share:/usr/share'
-    paths.extend(path for path in xdg_data_dirs_env.split(':') if os.path.isdir(path))
+    paths.extend(path for path in xdg_data_dirs_env.split(':') if core.isdir(path))
     return paths
 
 
 def find_first(
-    subpath: str, paths: list[TextType], validate: Callable = os.path.isfile
+    subpath: str, paths: list[TextType], validate: Callable = core.isfile
 ) -> str | None:
     """Return the first `subpath` found in the specified directory paths"""
     if os.path.isabs(subpath):

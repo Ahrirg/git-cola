@@ -1,4 +1,5 @@
 """Test the cmds module"""
+import os
 import time
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -31,21 +32,21 @@ def test_commit_strip_comments_unicode():
 def test_unix_path_win32():
     path = r'Z:\Program Files\git-cola\bin\git-dag'
     expect = '/Z/Program Files/git-cola/bin/git-dag'
-    actual = cmds.unix_path(path, is_win32=lambda: True)
+    actual = cmds.unix_path(path, is_win32=True)
     assert expect == actual
 
 
 def test_unix_path_network_win32():
     path = r'\\Z\Program Files\git-cola\bin\git-dag'
     expect = '//Z/Program Files/git-cola/bin/git-dag'
-    actual = cmds.unix_path(path, is_win32=lambda: True)
+    actual = cmds.unix_path(path, is_win32=True)
     assert expect == actual
 
 
 def test_unix_path_is_a_noop_on_sane_platforms():
     path = r'/:we/don\t/need/no/stinking/badgers!'
     expect = path
-    actual = cmds.unix_path(path, is_win32=lambda: False)
+    actual = cmds.unix_path(path, is_win32=False)
     assert expect == actual
 
 
@@ -266,3 +267,78 @@ def test_unstage_undo_restores_staged_state(app_context):
     cmd.undo()
     model.update_status()
     assert 'A' in model.staged
+
+
+def test_open_repo_loads_prepared_commit_message(app_context):
+    """Switching to a linked worktree loads that worktree's GIT_COLA_MSG"""
+    app_context.timestamp = time.time()
+    helper.commit_files()
+    worktree = os.path.join(os.getcwd(), 'wt')
+    helper.run_git('worktree', 'add', '--quiet', worktree, '-b', 'feature')
+    helper.write_file(
+        os.path.join(os.getcwd(), '.git', 'worktrees', 'wt', 'GIT_COLA_MSG'),
+        'prepared\n',
+    )
+    model = app_context.model
+    model.set_commitmsg('message for the old repository')
+
+    cmds.OpenRepo(app_context, worktree).do()
+
+    assert model.commitmsg == 'prepared\n'
+
+
+def test_open_repo_preserves_edited_commit_message(app_context):
+    """A message typed by hand survives switching repositories and back"""
+    app_context.timestamp = time.time()
+    helper.commit_files()
+    worktree = os.path.join(os.getcwd(), 'wt')
+    main_repo = os.getcwd()
+    helper.run_git('worktree', 'add', '--quiet', worktree, '-b', 'feature')
+    model = app_context.model
+    model.set_commitmsg('typed by hand')
+
+    cmds.OpenRepo(app_context, worktree).do()
+    assert model.commitmsg != 'typed by hand'
+
+    cmds.OpenRepo(app_context, main_repo).do()
+    assert model.commitmsg == 'typed by hand\n'
+
+
+def test_open_repo_reports_safe_directory_errors(app_context, monkeypatch):
+    """Repositories rejected by safe.directory are reported, not ignored"""
+    app_context.timestamp = time.time()
+    helper.commit_files()
+    main_repo = os.getcwd()
+    worktree = os.path.join(main_repo, 'wt')
+    helper.run_git('worktree', 'add', '--quiet', worktree, '-b', 'feature')
+    # Git's test suite uses this variable to simulate a repository that is owned
+    # by another user.
+    monkeypatch.setenv('GIT_TEST_ASSUME_DIFFERENT_OWNER', '1')
+
+    with patch('cola.cmds.Interaction') as interaction:
+        cmds.OpenRepo(app_context, worktree).do()
+
+    interaction.critical.assert_called_once()
+    details = interaction.critical.call_args.kwargs['details']
+    assert 'dubious ownership' in details
+    # We stay in the original repository.
+    assert os.path.samefile(app_context.git.worktree(), main_repo)
+
+
+def test_open_repo_reports_missing_repositories(app_context, tmp_path):
+    """Paths that are not Git repositories are reported, not ignored"""
+    app_context.timestamp = time.time()
+    helper.commit_files()
+    main_repo = os.getcwd()
+    model = app_context.model
+    # Stale errors from previous attempts must not be reported.
+    model.error = 'stale error'
+
+    with patch('cola.cmds.Interaction') as interaction:
+        cmds.OpenRepo(app_context, str(tmp_path)).do()
+
+    interaction.critical.assert_called_once()
+    details = interaction.critical.call_args.kwargs['details']
+    assert details != 'stale error'
+    assert str(tmp_path) in details
+    assert os.path.samefile(app_context.git.worktree(), main_repo)

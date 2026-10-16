@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
+from . import cmd
 from . import cmds
 from . import core
 from . import git
@@ -17,6 +18,7 @@ from . import utils
 from .i18n import N_
 from .interaction import Interaction
 from .models import dag
+from .models import prefs
 from .widgets import completion
 from .widgets import defs
 from .widgets import filetree
@@ -26,29 +28,38 @@ if TYPE_CHECKING:
     from .app import ApplicationContext
 
 
-class LaunchDifftool(cmds.ContextCommand):
+class LaunchDifftool(cmd.Command):
     """Launch "git difftool" with the currently selected files"""
+
+    UNDOABLE = False
 
     @staticmethod
     def name() -> str:
         return N_('Launch Diff Tool')
 
-    def do(self) -> None:
+    def do(self) -> bool:
         s = self.selection.selection()
         if s.unmerged:
             paths = s.unmerged
-            if utils.is_win32():
-                core.fork(['git', 'mergetool', '--no-prompt', '--'] + paths)
+            if core.IS_WIN32:
+                core.fork(
+                    ['git', 'mergetool', '--no-prompt', '--'] + paths,
+                    ops=self.context.ops,
+                )
             else:
                 cfg = self.cfg
-                cmd = cfg.terminal()
-                argv = utils.shell_split(cmd)
+                terminal_cmd = cfg.terminal()
+                argv = utils.shell_split(terminal_cmd)
 
                 terminal = os.path.basename(argv[0])
                 shellquote_terms = {'xfce4-terminal'}
                 shellquote_default = terminal in shellquote_terms
 
-                mergetool = ['git', 'mergetool', '--no-prompt', '--']
+                mergetool = ['git', 'mergetool', '--no-prompt']
+                tool = prefs.mergetool(self.context)
+                if tool:
+                    mergetool.append(f'--tool={tool}')
+                mergetool.append('--')
                 mergetool.extend(paths)
                 needs_shellquote = cfg.get(
                     'cola.terminalshellquote', shellquote_default
@@ -59,9 +70,10 @@ class LaunchDifftool(cmds.ContextCommand):
                 else:
                     argv.extend(mergetool)
 
-                core.fork(argv)
+                core.fork(argv, ops=self.context.ops)
         else:
             difftool_run(self.context)
+        return True
 
 
 class Difftool(standard.Dialog):
@@ -100,7 +112,7 @@ class Difftool(standard.Dialog):
         if expr is None or hide_expr:
             self.expr.hide()
 
-        self.tree = filetree.FileTree(parent=self)
+        self.tree = filetree.FileTree(self.context, parent=self)
 
         self.diff_button = qtutils.create_button(
             text=N_('Compare'), icon=icons.diff(), enabled=False, default=True
@@ -334,6 +346,9 @@ def difftool_launch(
         'no_prompt': True,
         '_readonly': True,
     }
+    tool = prefs.difftool(context)
+    if tool:
+        kwargs['tool'] = tool  # type: ignore
     if staged:
         kwargs['cached'] = True
     if dir_diff:
@@ -354,14 +369,17 @@ def difftool_launch(
     argv = ['git', 'difftool']
     argv.extend(git.transform_kwargs(**kwargs))
     argv.extend(args)
-    # "cmd" is for display purposes only and only displayed when an error occurs.
-    cmd = core.list2cmdline(argv)
-    context.notifier.git_cmd(cmd)
+    # "git_cmd" is for display purposes only and only displayed when an error occurs.
+    git_cmd = core.list2cmdline(argv)
+    context.notifier.git_cmd(git_cmd)
 
     runtask = context.runtask
     if runtask:
         Interaction.async_task(
-            N_('Difftool'), cmd, runtask, partial(context.git.difftool, *args, **kwargs)
+            N_('Difftool'),
+            git_cmd,
+            runtask,
+            partial(context.git.difftool, *args, **kwargs),
         )
     else:
         context.git.difftool(*args, **kwargs)

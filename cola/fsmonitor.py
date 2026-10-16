@@ -11,6 +11,7 @@ import errno
 import os
 import os.path
 import select
+from threading import Event
 from threading import Lock
 from typing import TYPE_CHECKING
 from typing import Any
@@ -20,9 +21,7 @@ from qtpy.QtCore import Signal
 
 from . import core
 from . import gitcmds
-from . import utils
 from . import version
-from .compat import bchr
 from .i18n import N_
 from .interaction import Interaction
 from .models import prefs
@@ -36,7 +35,7 @@ pywintypes = None
 win32file = None
 win32con = None
 win32event = None
-if utils.is_win32():
+if core.IS_WIN32:
     try:
         import pywintypes  # type: ignore
         import win32con  # type: ignore
@@ -47,7 +46,7 @@ if utils.is_win32():
     except ImportError:
         pass
 
-elif utils.is_linux():
+elif core.IS_LINUX:
     try:
         from . import inotify
     except ImportError:
@@ -56,14 +55,14 @@ elif utils.is_linux():
         AVAILABLE = 'inotify'
 
 
-class _Monitor(QtCore.QObject):
+class Monitor(QtCore.QObject):
     files_changed = Signal()
     config_changed = Signal()
 
     def __init__(
         self, context: ApplicationContext, thread_class: type[_InotifyThread]
     ) -> None:
-        QtCore.QObject.__init__(self)
+        super().__init__()
         self.context = context
         self._thread_class = thread_class
         self._thread: _InotifyThread | None = None
@@ -87,7 +86,7 @@ class _Monitor(QtCore.QObject):
 
 
 class _BaseThread(QtCore.QThread):
-    def __init__(self, context: ApplicationContext, monitor: _Monitor) -> None:
+    def __init__(self, context: ApplicationContext, monitor: Monitor) -> None:
         QtCore.QThread.__init__(self)
         self.context = context
         #: The delay, in milliseconds, between detecting file system modification
@@ -100,6 +99,10 @@ class _BaseThread(QtCore.QThread):
         self._force_notify = False
         self._force_config = False
         self._file_paths = set()
+        worktree = self.context.git.worktree()
+        if worktree is not None:
+            worktree = self.context.ops.abspath(worktree)
+        self._worktree = worktree
 
         self.context.cfg.repo_config_changed.connect(
             self._config_changed, QtCore.Qt.QueuedConnection
@@ -125,12 +128,15 @@ class _BaseThread(QtCore.QThread):
         if self._force_notify:
             do_notify = True
         elif self._file_paths:
-            proc = core.start_command(
-                ['git', 'check-ignore', '--verbose', '--non-matching', '-z', '--stdin']
+            path_list: bytes = b'\0'.join(
+                core.encode(path) for path in self._file_paths
             )
-            path_list = bchr(0).join(core.encode(path) for path in self._file_paths)
-            out, _ = proc.communicate(path_list)
-            if proc.returncode:
+            status, out, _ = self.context.ops.run_command(
+                ['git', 'check-ignore', '--verbose', '--non-matching', '-z', '--stdin'],
+                input=path_list,
+                cwd=self._worktree,
+            )
+            if status:
                 do_notify = True
             else:
                 # Each output record is four fields separated by NULL
@@ -140,7 +146,7 @@ class _BaseThread(QtCore.QThread):
                 # except for <pathname>.  So to see if we have any non-ignored
                 # files, we simply check every fourth field to see if any of
                 # them are empty.
-                source_fields = out.split(bchr(0))[0:-1:4]
+                source_fields = out.split('\0')[0:-1:4]  # type: ignore[arg-type]
                 do_notify = not all(source_fields)
         self._force_notify = False
         self._force_config = False
@@ -166,6 +172,40 @@ class _BaseThread(QtCore.QThread):
             self.inotify_delay = prefs.inotify_delay(self.context)
 
 
+class _RemoteThread(_BaseThread):
+    def __init__(self, context: ApplicationContext, monitor: Monitor) -> None:
+        super().__init__(context, monitor)
+        self._git_dir = self.context.git.git_path()
+        self._wake = Event()
+
+    def run(self) -> None:
+        context = self.context
+        context.ops.start_monitor(self._worktree, self._git_dir)
+        self._log_enabled_message()
+        while self._running:
+            self._wake.wait(self.inotify_delay / 1000.0)
+            self._wake.clear()
+            if not self._running:
+                break
+            try:
+                event = context.ops.poll_monitor()
+            except OSError:
+                continue
+            if event.get('files'):
+                self._monitor.files_changed.emit()
+            elif event.get('config'):
+                self._monitor.config_changed.emit()
+        context.ops.stop_monitor()
+
+    def refresh(self) -> None:
+        self.context.ops.refresh_monitor()
+
+    def stop(self) -> None:
+        self._running = False
+        self._wake.set()
+        self.wait()
+
+
 if AVAILABLE == 'inotify':
 
     class _InotifyThread(_BaseThread):
@@ -180,12 +220,12 @@ if AVAILABLE == 'inotify':
         )
         _ADD_MASK = _TRIGGER_MASK | inotify.IN_EXCL_UNLINK | inotify.IN_ONLYDIR
 
-        def __init__(self, context: ApplicationContext, monitor: _Monitor) -> None:
+        def __init__(self, context: ApplicationContext, monitor: Monitor) -> None:
             _BaseThread.__init__(self, context, monitor)
             git = context.git
             worktree = git.worktree()
             if worktree is not None:
-                worktree = core.abspath(worktree)
+                worktree = self.context.ops.abspath(worktree)
             self._worktree = worktree
             self._git_dir = git.git_path()
             self._lock = Lock()
@@ -320,7 +360,7 @@ if AVAILABLE == 'inotify':
                         # removed on the filesystem before we call
                         # inotify.rm_watch() so ignore it.
                         continue
-                    raise e
+                    raise
             for path in paths_to_watch - watched_paths:
                 try:
                     wd = inotify.add_watch(
@@ -338,16 +378,14 @@ if AVAILABLE == 'inotify':
                         # before the call to inotify.add_watch().  Therefore we
                         # simply ignore them.
                         continue
-                    raise e
+                    raise
                 wd_to_path_map[wd] = path
                 path_to_wd_map[path] = wd
 
         def _check_event(self, wd, mask, name) -> None:
             if mask & inotify.IN_Q_OVERFLOW:
                 self._force_notify = True
-            elif not mask & self._TRIGGER_MASK:
-                pass
-            elif mask & inotify.IN_ISDIR:
+            elif not mask & self._TRIGGER_MASK or mask & inotify.IN_ISDIR:
                 pass
             elif wd in self._worktree_wd_to_path_map:
                 if self._use_check_ignore and name:
@@ -377,7 +415,7 @@ if AVAILABLE == 'inotify':
             self._running = False
             with self._lock:
                 if self._pipe_w is not None:
-                    os.write(self._pipe_w, bchr(0))
+                    os.write(self._pipe_w, b'\0')
             self.wait()
 
 
@@ -468,13 +506,14 @@ if AVAILABLE == 'pywin32':
             git = context.git
             worktree = git.worktree()
             if worktree is not None:
-                worktree = self._transform_path(core.abspath(worktree))
+                worktree = self._transform_path(context.ops.abspath(worktree))
             self._worktree = worktree
             self._worktree_watch: _Win32Watch | None = None
-            self._git_dir = self._transform_path(core.abspath(git.git_path()))
+            self._git_dir = self._transform_path(context.ops.abspath(git.git_path()))
             self._git_dir_watch: _Win32Watch | None = None
             self._stop_event_lock = Lock()
             self._stop_event = None
+            self.context = context
 
         @staticmethod
         def _transform_path(path: str) -> str:
@@ -537,7 +576,7 @@ if AVAILABLE == 'pywin32':
                     if (
                         path != self._git_dir
                         and not path.startswith(self._git_dir + '/')
-                        and not os.path.isdir(path)
+                        and not self.context.ops.isdir(path)
                     ):
                         if self._use_check_ignore:
                             self._file_paths.add(path)
@@ -568,7 +607,7 @@ if AVAILABLE == 'pywin32':
             self.wait()
 
 
-def create(context: ApplicationContext) -> _Monitor:
+def create(context: ApplicationContext) -> Monitor:
     thread_class = None
     cfg = context.cfg
     if not cfg.get('cola.inotify', default=True):
@@ -577,21 +616,23 @@ def create(context: ApplicationContext) -> _Monitor:
             ' "cola.inotify" is false.\n'
         )
         Interaction.log(msg)
+    elif context.ops.is_remote():
+        thread_class = _RemoteThread
     elif AVAILABLE == 'inotify':
         thread_class = _InotifyThread
     elif AVAILABLE == 'pywin32':
         thread_class = _Win32Thread
     else:
-        if utils.is_win32():
+        if core.IS_WIN32:
             msg = N_(
                 'File system change monitoring: disabled because pywin32'
                 ' is not installed.\n'
             )
             Interaction.log(msg)
-        elif utils.is_linux():
+        elif core.IS_LINUX:
             msg = N_(
                 'File system change monitoring: disabled because libc'
                 ' does not support the inotify system calls.\n'
             )
             Interaction.log(msg)
-    return _Monitor(context, thread_class)
+    return Monitor(context, thread_class)

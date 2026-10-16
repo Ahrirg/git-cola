@@ -17,7 +17,6 @@ except ImportError:
 
 from . import core
 from . import resources
-from . import utils
 
 
 class NullTranslation:
@@ -98,13 +97,13 @@ def get_filename_for_locale(name: str | None) -> str | None:
 
     name: str = name.split('.', 1)[0]  # foo_BAR.UTF-8 -> foo_BAR
 
-    filename = resources.i18n('%s.po' % name)
-    if os.path.exists(filename):
+    filename = resources.i18n(f'{name}.po')
+    if core.exists(filename):
         return filename
 
     short_name = name.split('_', 1)[0]
-    filename = resources.i18n('%s.po' % short_name)
-    if os.path.exists(filename):
+    filename = resources.i18n(f'{short_name}.po')
+    if core.exists(filename):
         return filename
     return None
 
@@ -152,7 +151,7 @@ def get_default_locale() -> str | None:
 
     # Windows method for getting the user's locale.
     if (
-        utils.is_win32()
+        core.IS_WIN32
         and hasattr(ctypes, 'windll')
         and hasattr(locale, 'windows_locale')
     ):

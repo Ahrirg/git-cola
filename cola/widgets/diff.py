@@ -1,11 +1,13 @@
+from __future__ import annotations
 import os
 import re
 import time
 from functools import partial
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from qtpy import QtCore
 from qtpy import QtGui
+from qtpy import QtSvg
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
@@ -37,6 +39,9 @@ from .text import TextDecorator
 from .text import TextSearchWidget
 from .text import VimHintedPlainTextEdit
 from .text import label_selection_timer
+
+if TYPE_CHECKING:
+    from ..app import ApplicationContext
 
 ENABLE_INTRALINE_DIFF = True
 
@@ -292,8 +297,6 @@ class DiffTextEdit(VimHintedPlainTextEdit):
     def refresh_appearance(self) -> None:
         """Update palette-derived colors after a system appearance change."""
         self.highlighter.refresh_palette(self.context)
-        if self.numbers:
-            self.numbers.refresh_palette()
 
     def changeEvent(self, event):
         if event.type() == QtCore.QEvent.PaletteChange:
@@ -400,7 +403,7 @@ class DiffTextEdit(VimHintedPlainTextEdit):
 
     def _build_intraline_diff_config(
         self,
-    ) -> Optional[intraline_diff.IntralineDiffConfig]:
+    ) -> intraline_diff.IntralineDiffConfig | None:
         """Build the intra-line diff config for the current preset."""
         preset_item = diff_intraline.intraline_diff_preset_item(
             self._intraline_diff_preset
@@ -441,7 +444,7 @@ class DiffTextEdit(VimHintedPlainTextEdit):
     ) -> tuple[
         intraline_diff.SpansByLineIndex,
         float,
-        Optional[intraline_diff.IntralineDiffResult],
+        intraline_diff.IntralineDiffResult | None,
     ]:
         """Try to compute intra-line spans and return output details."""
         intraline_spans = {}
@@ -592,6 +595,11 @@ class DiffLineNumbers(TextDecorator):
         self._disabled = palette.color(QPalette.Disabled, QPalette.Text)
         self.update()
 
+    def changeEvent(self, event):
+        if event.type() == QtCore.QEvent.PaletteChange:
+            self.refresh_palette()
+        super().changeEvent(event)
+
     def set_diff(self, diff, lines=None):
         """Update to a new diff display"""
         if lines is None:
@@ -711,6 +719,7 @@ class Viewer(QtWidgets.QFrame):
         self.model = model = context.model
         self.images = []
         self.pixmaps = []
+        self.sources = []
         italic_font = self.font()
         italic_font.setItalic(True)
 
@@ -787,7 +796,7 @@ class Viewer(QtWidgets.QFrame):
     def dragEnterEvent(self, event):
         """Accepts drops if the mimedata contains patches"""
         super().dragEnterEvent(event)
-        patches = get_patches_from_mimedata(event.mimeData())
+        patches = get_patches_from_mimedata(self.context, event.mimeData())
         if patches:
             event.acceptProposedAction()
             self._drag_has_patches = True
@@ -810,7 +819,7 @@ class Viewer(QtWidgets.QFrame):
         super().dropEvent(event)
         self._drag_has_patches = False
 
-        patches = get_patches_from_mimedata(event.mimeData())
+        patches = get_patches_from_mimedata(self.context, event.mimeData())
         if patches:
             apply_patches(self.context, patches=patches)
 
@@ -900,6 +909,40 @@ class Viewer(QtWidgets.QFrame):
         else:
             self.stack.setCurrentWidget(self.text)
 
+            # Workaround: when switching between text and images, Qt does not properly
+            # render the text when switching back to the text widget. The line numbers
+            # display must be enabled in order to trigger the bug.
+            #
+            # The symptoms are that the text is shifted to the left -- the same width as
+            # the line numbers display itself, and the left side of the text is cutoff
+            # by the numbers display that renders over it. The left side of the text is
+            # cutoff by the numbers display, basically, instead of the text being
+            # correctly shifted to the right so that they render side-by-side.
+            #
+            # The text fixes itself as soon as the widget is given focus, which causes
+            # the cursor to be made visible, but we do not want to steal focus away from
+            # whichever widget the user is using.
+            #
+            # A workaround tested on Debian/testing with Qt/6.10.2 QtPy/2.4.2
+            # PyQt6/6.11.0 is to update the text cursor.
+            text_length = len(self.text.value())
+            if text_length > 1:
+                cursor = self.text.textCursor()
+                position = cursor.position()
+                # If we are before the end then reset the position by temporarily
+                # incrementing the position. If we are at the end then we'll temporarily
+                # decrement the cursor's position.
+                if position < text_length - 1:
+                    offset = 1
+                else:
+                    offset = -1
+                # Here's the hacky workaround. Ideally, we shouldn't need these two
+                # setTextCursor() calls.
+                tmp_cursor = self.text.textCursor()
+                tmp_cursor.setPosition(position + offset)
+                self.text.setTextCursor(tmp_cursor)
+                self.text.setTextCursor(cursor)
+
     def set_file_type(self, file_type):
         """Manage the diff options when the file type changes"""
         # The "file type" is whether the file itself is an image.
@@ -944,33 +987,46 @@ class Viewer(QtWidgets.QFrame):
 
     def cleanup(self):
         for image, unlink in self.images:
-            if unlink and core.exists(image):
-                os.unlink(image)
+            if unlink and self.context.ops.exists(image):
+                self.context.ops.unlink(image)
         self.images = []
 
     def set_images(self, images):
         self.images = images
         self.pixmaps = []
+        self.sources = []
         if not images:
             self.reset()
             return False
 
-        # In order to comp, we first have to load all the images
-        all_pixmaps = [QtGui.QPixmap(image[0]) for image in images]
-        pixmaps = [pixmap for pixmap in all_pixmaps if not pixmap.isNull()]
-        if not pixmaps:
+        # In order to comp, we first have to load all the images. SVGs are kept
+        # as renderers so they can be re-rasterised crisply at display size.
+        sources = [load_image_source(image[0]) for image in images]
+        sources = [source for source in sources if source is not None]
+        if not sources:
             self.reset()
             return False
 
-        self.pixmaps = pixmaps
+        self.sources = sources
+        self.pixmaps = [
+            source for source in sources if isinstance(source, QtGui.QPixmap)
+        ]
         self.render()
         self.cleanup()
         return True
 
     def render(self):
         # Update images
-        if self.pixmaps:
-            mode = self.options.image_mode.currentIndex()
+        mode = self.options.image_mode.currentIndex()
+        if self.sources and any(is_svg_source(source) for source in self.sources):
+            # Vector sources: hand the view a re-rasterising callback so the
+            # image stays sharp at any zoom level or device-pixel-ratio.
+            sources = self.sources
+            logical = comp_logical_size(sources, mode)
+            self.image.set_image_source(
+                lambda scale: render_comp_image(sources, mode, scale), logical
+            )
+        elif self.pixmaps:
             if mode == self.options.SIDE_BY_SIDE:
                 image = self.render_side_by_side()
             elif mode == self.options.DIFF:
@@ -981,9 +1037,9 @@ class Viewer(QtWidgets.QFrame):
                 image = self.render_pixel_xor()
             else:
                 image = self.render_side_by_side()
+            self.image.pixmap = image
         else:
-            image = QtGui.QPixmap()
-        self.image.pixmap = image
+            self.image.pixmap = QtGui.QPixmap()
 
         # Apply zoom
         zoom_mode = self.options.zoom_mode.currentIndex()
@@ -993,6 +1049,8 @@ class Viewer(QtWidgets.QFrame):
             self.image.scale(zoom_factor, zoom_factor)
             poly = self.image.mapToScene(self.image.viewport().rect())
             self.image.last_scene_roi = poly.boundingRect()
+        # Re-rasterise any vector source at the resulting fixed-zoom scale.
+        self.image.update_render_resolution()
 
     def render_side_by_side(self):
         # Side-by-side lineup comp
@@ -1057,6 +1115,112 @@ def create_painter(image):
     return painter
 
 
+def _comp_mode(mode):
+    """Map an Options mode index to its QPainter composition mode, or None."""
+    return {
+        Options.DIFF: QtGui.QPainter.CompositionMode_Difference,
+        Options.XOR: QtGui.QPainter.CompositionMode_Xor,
+        Options.PIXEL_XOR: QtGui.QPainter.RasterOp_SourceXorDestination,
+    }.get(mode)
+
+
+def load_image_source(path):
+    """Load an image path as a re-rasterisable SVG renderer or a QPixmap.
+
+    Returns a ``QtSvg.QSvgRenderer`` for valid SVGs, a non-null ``QPixmap`` for
+    raster images, or ``None`` when the file cannot be loaded.
+    """
+    if imageview.looks_like_svg(path):
+        renderer = QtSvg.QSvgRenderer(path)
+        if renderer.isValid():
+            return renderer
+    pixmap = QtGui.QPixmap(path)
+    if pixmap.isNull():
+        return None
+    return pixmap
+
+
+def is_svg_source(source):
+    return isinstance(source, QtSvg.QSvgRenderer)
+
+
+def source_logical_size(source):
+    """Return the logical size of an image source in device-independent pixels."""
+    if is_svg_source(source):
+        size = source.defaultSize()
+        if size.isEmpty():
+            size = source.viewBox().size()
+        return size
+    return source.size()
+
+
+def comp_logical_size(sources, mode):
+    """Logical size of the composited image for the given sources and mode."""
+    sizes = [source_logical_size(source) for source in sources]
+    if mode == Options.SIDE_BY_SIDE:
+        width = sum(size.width() for size in sizes)
+        height = max(size.height() for size in sizes)
+    else:
+        width = max(size.width() for size in sizes)
+        height = max(size.height() for size in sizes)
+    return QtCore.QSize(width, height)
+
+
+def paint_source(painter, source, rect):
+    """Paint a single image source into ``rect`` (a device-pixel QRectF)."""
+    if is_svg_source(source):
+        source.render(painter, rect)
+    else:
+        painter.drawPixmap(rect, source, QtCore.QRectF(source.rect()))
+
+
+def render_comp_image(sources, mode, scale):
+    """Composite ``sources`` at ``scale`` device pixels per logical unit.
+
+    The returned pixmap carries a device-pixel-ratio of ``scale`` so it occupies
+    the logical composited size while painting at higher resolution. SVGs are
+    rasterised directly at the target size, so they stay crisp.
+    """
+    sizes = [source_logical_size(source) for source in sources]
+    logical = comp_logical_size(sources, mode)
+    image = create_image(
+        max(1, int(round(logical.width() * scale))),
+        max(1, int(round(logical.height() * scale))),
+    )
+    painter = create_painter(image)
+    painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+    painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
+
+    if mode == Options.SIDE_BY_SIDE:
+        x = 0.0
+        for source, size in zip(sources, sizes):
+            rect = QtCore.QRectF(
+                x * scale, 0.0, size.width() * scale, size.height() * scale
+            )
+            paint_source(painter, source, rect)
+            x += size.width()
+    else:
+        comp_mode = _comp_mode(mode)
+        if len(sources) == 1:
+            pairs = [(sources[0], sizes[0])]
+        else:
+            pairs = [(sources[0], sizes[0]), (sources[-1], sizes[-1])]
+        for source, size in pairs:
+            x = (logical.width() - size.width()) / 2.0
+            y = (logical.height() - size.height()) / 2.0
+            rect = QtCore.QRectF(
+                x * scale, y * scale, size.width() * scale, size.height() * scale
+            )
+            paint_source(painter, source, rect)
+            if comp_mode is not None:
+                painter.setCompositionMode(comp_mode)
+    painter.end()
+
+    pixmap = QtGui.QPixmap.fromImage(image)
+    pixmap.setDevicePixelRatio(scale)
+    return pixmap
+
+
 class Options(QtWidgets.QWidget):
     """Provide the options widget used by the editor
 
@@ -1075,6 +1239,15 @@ class Options(QtWidgets.QWidget):
         # Create widgets
         self.widget = parent
         self.filename = filename  # The filename plain text display.
+        # Width of the leading gutter for the embedded menu rows below, sized so
+        # their labels line up with the native checkable items' text. Read from
+        # the active style rather than hardcoded so it tracks the platform --
+        # macOS uses different padding/inset values than Fusion. Falls back to
+        # the icon-size constant if the style reports 0.
+        menu_icon_gutter = (
+            self.style().pixelMetric(QtWidgets.QStyle.PM_SmallIconSize)
+            or defs.default_icon
+        )
         self.ignore_space_at_eol = self.add_option(
             N_('Ignore changes in whitespace at EOL')
         )
@@ -1105,12 +1278,19 @@ class Options(QtWidgets.QWidget):
         )
         self.max_diff_spinbox.setSpecialValueText(N_('Unlimited'))
         self.max_diff_widget = QtWidgets.QWidget(self)
+        # The leading gutter lines the label up with the checkable items below
+        # (which are indented past the check/icon column), and the margins keep
+        # the spin box off the menu's right edge.
         self.max_diff_layout = qtutils.hbox(
             defs.no_margin,
-            defs.button_spacing,
+            defs.titlebar_spacing,
+            menu_icon_gutter,
             self.max_diff_label,
             qtutils.STRETCH,
             self.max_diff_spinbox,
+        )
+        self.max_diff_layout.setContentsMargins(
+            defs.small_margin, defs.small_margin, defs.margin, defs.small_margin
         )
         self.max_diff_widget.setLayout(self.max_diff_layout)
         self.max_diff_action = QtWidgets.QWidgetAction(self)
@@ -1170,11 +1350,19 @@ class Options(QtWidgets.QWidget):
         except Exception:
             pass
 
+        # Match the max-diff row: the same gutter aligns the label with the
+        # checkable items, a stretch right-aligns the combo, and the margins
+        # keep it off the menu's right edge.
         intraline_layout = qtutils.hbox(
             defs.no_margin,
-            defs.button_spacing,
+            defs.titlebar_spacing,
+            menu_icon_gutter,
             self.intraline_diff_preset_label,
+            qtutils.STRETCH,
             self.intraline_diff_preset_combo,
+        )
+        intraline_layout.setContentsMargins(
+            defs.small_margin, defs.small_margin, defs.margin, defs.small_margin
         )
         self.intraline_diff_widget.setLayout(intraline_layout)
 
@@ -1325,6 +1513,8 @@ class DiffEditor(DiffTextEdit):
 
     def __init__(self, context, options, parent):
         DiffTextEdit.__init__(self, context, parent, numbers=True)
+        # Guide the user when nothing is selected instead of showing a blank pane.
+        self.hint.set_value(N_('Select a file to view its diff'))
         self.context = context
         self.model = model = context.model
         self.selection_model = selection_model = context.selection
@@ -1477,7 +1667,7 @@ class DiffEditor(DiffTextEdit):
         if model.is_partially_stageable():
             item = s.modified[0] if s.modified else None
             if item in model.submodules:
-                path = core.abspath(item)
+                path = self.context.ops.abspath(item)
                 action = qtutils.add_action_with_icon(
                     menu,
                     icons.add(),
@@ -1523,7 +1713,7 @@ class DiffEditor(DiffTextEdit):
                 add_action(self.action_revert_unstaged_edits)
                 # Do not show the "edit" action when the file does not exist.
                 add_action(qtutils.menu_separator(menu))
-                if filename and core.exists(filename):
+                if filename and self.context.ops.exists(filename):
                     add_action(self.launch_editor)
                 # Removed files can still be diffed.
                 add_action(self.launch_difftool)
@@ -1540,7 +1730,7 @@ class DiffEditor(DiffTextEdit):
         if s.staged and model.is_unstageable():
             item = s.staged[0]
             if item in model.submodules:
-                path = core.abspath(item)
+                path = self.context.ops.abspath(item)
                 action = qtutils.add_action_with_icon(
                     menu,
                     icons.remove(),
@@ -1565,7 +1755,7 @@ class DiffEditor(DiffTextEdit):
             elif item not in model.staged_deleted:
                 # Do not show the "edit" action when the file does not exist.
                 add_action(qtutils.menu_separator(menu))
-                if filename and core.exists(filename):
+                if filename and self.context.ops.exists(filename):
                     add_action(self.launch_editor)
                 # Removed files can still be diffed.
                 add_action(self.launch_difftool)
@@ -1584,7 +1774,7 @@ class DiffEditor(DiffTextEdit):
             add_action(qtutils.menu_separator(menu))
             # Do not show the "edit" action when the file does not exist.
             # Untracked files exist by definition.
-            if filename and core.exists(filename):
+            if filename and self.context.ops.exists(filename):
                 add_action(self.launch_editor)
 
             # Removed files can still be diffed.
@@ -1782,13 +1972,13 @@ def _build_patch_append_menu(widget, context, menu):
     path = prefs.patches_directory(context)
     patches = get_patches_from_dir(path)
     for patch in patches:
-        relpath = os.path.relpath(patch, start=path)
+        relpath = context.ops.relpath(patch, start=path)
         sub_menu = _add_patch_subdirs(menu, subdir_menus, relpath)
         patch_basename = os.path.basename(relpath)
         append_action = qtutils.add_action(
             sub_menu,
             patch_basename,
-            lambda patch_file=patch: _append_patch(widget, patch_file),
+            lambda patch_file=patch: _append_patch(context, widget, patch_file),
         )
         append_action.setIcon(icons.save())
         sub_menu.addAction(append_action)
@@ -1830,32 +2020,34 @@ def _export_patch(diff_editor, context, append=False):
         filename = qtutils.save_as(default_filename)
     if not filename:
         return
-    _write_patch_to_file(diff_editor, patch, filename, append=append)
+    _write_patch_to_file(context, diff_editor, patch, filename, append=append)
 
 
-def _append_patch(diff_editor, filename):
+def _append_patch(context: ApplicationContext, diff_editor, filename):
     """Append diffs to the specified patch file"""
     if diff_editor.selection_model.is_empty():
         return
     patch = diff_editor.extract_patch(reverse=False)
     if not patch.has_changes():
         return
-    _write_patch_to_file(diff_editor, patch, filename, append=True)
+    _write_patch_to_file(context, diff_editor, patch, filename, append=True)
 
 
-def _write_patch_to_file(diff_editor, patch, filename, append=False):
+def _write_patch_to_file(
+    context: ApplicationContext, diff_editor, patch, filename, append=False
+):
     """Write diffs from the Diff Editor to the specified patch file"""
     encoding = diff_editor.patch_encoding()
     content = patch.as_text()
     try:
-        core.write(filename, content, encoding=encoding, append=append)
+        context.ops.write_file(filename, content, encoding=encoding, append=append)
     except OSError as exc:
         _, details = utils.format_exception(exc)
         title = N_('Error writing patch')
-        msg = N_('Unable to write patch to "%s". Check permissions?' % filename)
+        msg = N_(f'Unable to write patch to "{filename}". Check permissions?')
         Interaction.critical(title, message=msg, details=details)
         return
-    Interaction.log('Patch written to "%s"' % filename)
+    Interaction.log(f'Patch written to "{filename}"')
 
 
 class ObjectIdLabel(PlainTextLabel):
@@ -2130,7 +2322,7 @@ class CommitDiffWidget(QtWidgets.QWidget):
 
     def set_details(self, oid, author, email, date, summary):
         template_args = {'author': author, 'email': email}
-        author_text = '%(author)s <%(email)s>' % template_args
+        author_text = '{author} <{email}>'.format(**template_args)
         self.date_label.set_text(date)
         self.date_label.setVisible(bool(date))
         self.oid_label.set_oid(oid)
@@ -2236,24 +2428,26 @@ def new_apply_patches(context, patches=None, parent=None):
     return dlg
 
 
-def get_patches_from_paths(paths):
+def get_patches_from_paths(context: ApplicationContext, paths):
     """Returns all patches beneath a given path"""
     paths = [core.decode(p) for p in paths]
-    patches = [p for p in paths if core.isfile(p) and p.endswith(('.patch', '.mbox'))]
-    dirs = [p for p in paths if core.isdir(p)]
+    patches = [
+        p for p in paths if context.ops.isfile(p) and p.endswith(('.patch', '.mbox'))
+    ]
+    dirs = [p for p in paths if context.ops.isdir(p)]  # TODO Batch this to improve efficiency in RemoteOperations mode.
     dirs.sort()
     for d in dirs:
         patches.extend(get_patches_from_dir(d))
     return patches
 
 
-def get_patches_from_mimedata(mimedata):
+def get_patches_from_mimedata(context: ApplicationContext, mimedata):
     """Extract path files from a QMimeData payload"""
     urls = mimedata.urls()
     if not urls:
         return []
     paths = [x.path() for x in urls]
-    return get_patches_from_paths(paths)
+    return get_patches_from_paths(context, paths)
 
 
 def get_patches_from_dir(path):
@@ -2274,7 +2468,7 @@ class ApplyPatches(standard.Dialog):
         if parent is not None:
             self.setWindowModality(Qt.WindowModal)
 
-        self.curdir = core.getcwd()
+        self.curdir = self.context.ops.getcwd()
         self.inner_drag = False
 
         self.usage = QtWidgets.QLabel()
@@ -2375,25 +2569,25 @@ class ApplyPatches(standard.Dialog):
         if not files:
             return
         self.curdir = os.path.dirname(files[0])
-        self.add_paths([core.relpath(f) for f in files])
+        self.add_paths([self.context.ops.relpath(f) for f in files])  # TODO Batch this to improve efficiency in RemoteOperations mode.
 
     def dragEnterEvent(self, event):
         """Accepts drops if the mimedata contains patches"""
         super().dragEnterEvent(event)
-        patches = get_patches_from_mimedata(event.mimeData())
+        patches = get_patches_from_mimedata(self.context, event.mimeData())
         if patches:
             event.acceptProposedAction()
 
     def dropEvent(self, event):
         """Add dropped patches"""
         event.accept()
-        patches = get_patches_from_mimedata(event.mimeData())
+        patches = get_patches_from_mimedata(self.context, event.mimeData())
         if not patches:
             return
         self.add_paths(patches)
 
     def add_paths(self, paths):
-        self.tree.add_paths(paths)
+        self.tree.add_paths(self.context, paths)
 
     def _tree_selection_changed(self):
         items = self.tree.selected_items()
@@ -2401,7 +2595,7 @@ class ApplyPatches(standard.Dialog):
             return
         item = items[-1]  # take the last item
         path = item.data(0, Qt.UserRole)
-        if not core.exists(path):
+        if not self.context.ops.exists(path):
             return
         commit = parse_patch(path)
         self.diffwidget.set_details(
@@ -2426,8 +2620,8 @@ class ApplyPatches(standard.Dialog):
 
 
 class PatchTreeWidget(standard.DraggableTreeWidget):
-    def add_paths(self, paths):
-        patches = get_patches_from_paths(paths)
+    def add_paths(self, context: ApplicationContext, paths):
+        patches = get_patches_from_paths(context, paths)
         if not patches:
             return
         items = []
@@ -2446,7 +2640,7 @@ class PatchTreeWidget(standard.DraggableTreeWidget):
     def remove_selected(self):
         idxs = self.selectedIndexes()
         rows = [idx.row() for idx in idxs]
-        for row in reversed(sorted(rows)):
+        for row in sorted(rows, reverse=True):
             self.invisibleRootItem().takeChild(row)
 
 
